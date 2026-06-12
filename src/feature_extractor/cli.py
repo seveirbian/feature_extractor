@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Batch feature extraction entry point for egoWM Phase 1.
+"""Batch feature extraction entry point for the feature_extractor package.
 
 Extracts DINO, Depth, and Pose features from videos and stores them in HDF5.
 
 Usage:
-    python scripts/extract_features.py \
+    feature-extract \
         --data_root data/openego/videos \
         --output_root data/features \
         --num_samples 10 \
@@ -12,7 +12,7 @@ Usage:
         --branches dino,depth,pose
 
     # Resume: only extract missing videos
-    python scripts/extract_features.py --resume
+    feature-extract --resume
 """
 
 from __future__ import annotations
