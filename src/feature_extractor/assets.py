@@ -2,6 +2,11 @@
 
 Priority: explicit argument > env var FEATURE_EXTRACTOR_ASSETS > package root.
 The package root is where the ``third_party/`` symlink is expected to live.
+
+The package-root default is only meaningful when the package is used from its
+source tree or an editable install (``uv run`` / ``pip install -e .``). If the
+package is ever installed as a plain wheel into site-packages, pass
+``assets_root`` explicitly or set ``FEATURE_EXTRACTOR_ASSETS`` instead.
 """
 
 from __future__ import annotations
