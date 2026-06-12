@@ -2,5 +2,6 @@
 
 from .dino import DINOExtractor
 from .depth import DepthExtractor
+from .pose import PoseExtractor
 
-__all__ = ["DINOExtractor", "DepthExtractor"]
+__all__ = ["DINOExtractor", "DepthExtractor", "PoseExtractor"]
