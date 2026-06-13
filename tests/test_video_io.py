@@ -10,6 +10,7 @@ not merely the frame shape.
 import numpy as np
 import pytest
 
+from feature_extractor.validation.synthetic import make_ramp_video
 from feature_extractor.video_io import VideoReader, cpu
 
 N_FRAMES = 12
@@ -18,20 +19,7 @@ WIDTH, HEIGHT = 128, 96
 
 
 def _make_video(path, codec):
-    import av
-
-    with av.open(str(path), mode="w") as container:
-        stream = container.add_stream(codec, rate=10)
-        stream.width = WIDTH
-        stream.height = HEIGHT
-        stream.pix_fmt = "yuv420p"
-        for i in range(N_FRAMES):
-            arr = np.full((HEIGHT, WIDTH, 3), i * STEP, dtype=np.uint8)
-            frame = av.VideoFrame.from_ndarray(arr, format="rgb24")
-            for packet in stream.encode(frame):
-                container.mux(packet)
-        for packet in stream.encode():
-            container.mux(packet)
+    make_ramp_video(path, codec=codec, n_frames=N_FRAMES, width=WIDTH, height=HEIGHT, step=STEP)
 
 
 @pytest.fixture(scope="module")
