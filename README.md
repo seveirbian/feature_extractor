@@ -25,16 +25,22 @@ uv sync
 ```
 third_party/dinov3/checkpoints/dinov3_vits16plus_pretrain_lvd1689m-*.pth
 third_party/Video-Depth-Anything/checkpoints/video_depth_anything_vitl.pth
+third_party/ml-depth-pro/checkpoints/depth_pro.pt
 third_party/VGGT/checkpoints/models--facebook--VGGT-1B/...
 ```
 
-请从各模型的上游下载;若本机已有一份(例如某个 egoWM 检出),可直接软链复用,免去重复下载:
+权重已托管在华为云 OBS,用 [`obsutil`](https://support.huaweicloud.com/utiltg-obs/obs_11_0003.html)
+在仓库根目录执行下面的命令下载到对应目录(需先用 `obsutil config` 配好 AK/SK):
 
 ```bash
-for d in VGGT Video-Depth-Anything dinov3 ml-depth-pro; do
-  ln -sfn /root/codes/egoWM/third_party/$d/checkpoints third_party/$d/checkpoints
-done
+obsutil cp obs://cloudrobo-model/wangchao/egoWM/third_party/dinov3/checkpoints               ./third_party/dinov3/checkpoints               -r -f
+obsutil cp obs://cloudrobo-model/wangchao/egoWM/third_party/Video-Depth-Anything/checkpoints ./third_party/Video-Depth-Anything/checkpoints -r -f
+obsutil cp obs://cloudrobo-model/wangchao/egoWM/third_party/ml-depth-pro/checkpoints          ./third_party/ml-depth-pro/checkpoints          -r -f
+obsutil cp obs://cloudrobo-model/wangchao/egoWM/third_party/VGGT/checkpoints                  ./third_party/VGGT/checkpoints                  -r -f
 ```
+
+只用部分后端时,只下对应的那几行即可(例如默认 `dino_attention` 不需要任何权重;
+`video_depth_anything` 需要 `Video-Depth-Anything` 与 `ml-depth-pro` 两份)。
 
 ## 命令行(CLI)
 
