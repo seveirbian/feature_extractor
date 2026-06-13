@@ -7,17 +7,41 @@ requires-python = ">=3.12"
 dependencies = [
     "torch>=2.5.0",
     "torchvision>=0.20.0",
-    "numpy>=1.26.0",
+    # numpy<2 required by vendored VGGT (third_party/VGGT)
+    "numpy>=1.26.0,<2",
     "h5py>=3.13.0",
     "tqdm>=4.66.0",
     "opencv-python>=4.10.0",
     "pillow>=10.0.0",
     "decord>=0.6.0",
     "timm>=1.0.0",
+    # required by vendored VGGT pose model (third_party/VGGT)
+    "einops>=0.7.0",
+    "safetensors>=0.4.0",
+    "huggingface_hub>=0.24.0",
+    # required by --depth_mode video_depth_anything / depth_pro:
+    #   easydict        -> third_party/Video-Depth-Anything
+    #   matplotlib,
+    #   pillow_heif     -> third_party/ml-depth-pro (Depth Pro metric correction)
+    "easydict>=1.10",
+    "matplotlib>=3.7.0",
+    "pillow_heif>=0.13.0",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0.0"]
+
+# Pin torch/torchvision to a CUDA 12.4 build. The default index ships
+# +cu130 wheels that need a driver newer than this host's CUDA 12.5
+# driver (535.x), which silently falls back to CPU.
+[tool.uv.sources]
+torch = { index = "pytorch-cu124" }
+torchvision = { index = "pytorch-cu124" }
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
 
 [project.scripts]
 feature-extract = "feature_extractor.cli:main"

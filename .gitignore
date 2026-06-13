@@ -11,3 +11,6 @@ wheels/
 
 # Runtime symlink to egoWM model assets (machine-specific)
 /third_party
+
+# Input videos and extracted feature outputs
+/data

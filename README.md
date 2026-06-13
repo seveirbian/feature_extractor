@@ -29,12 +29,31 @@ The root is the directory that *contains* `third_party/`.
 
 ```bash
 # choose GPU via CUDA_VISIBLE_DEVICES
-CUDA_VISIBLE_DEVICES=0 uv run feature-extract \
-    --data_root data/openego/videos \
+CUDA_VISIBLE_DEVICES=7 uv run feature-extract \
+    --data_root data/openego/ \
     --output_root data/features \
     --device cuda \
-    --branches dino,depth,pose
+    --branches dino,depth,pose \
+    --depth_mode video_depth_anything \
+    --frames_per_video 64 \
+    --id_from_stem
 ```
+
+`--data_root` is walked recursively for video files (e.g.
+`data/openego/HO-Cap/Ho-Cap/demo_*/video.mp4`).
+
+### Depth modes (`--depth_mode`)
+
+The default is `dino_attention`, a **DINO-attention proxy** — fast and
+dependency-free, but *not* geometric depth. For real depth, pick a model
+backend (its checkpoint must already be under `third_party/.../checkpoints/`):
+
+| mode | backend | extra deps |
+|------|---------|-----------|
+| `dino_attention` (default) | DINO attention proxy | none |
+| `video_depth_anything` | Video Depth Anything (`vitl`) + Depth Pro metric correction | bundled in `uv sync` |
+| `da3` | Depth Anything V3 | `pip install depth_anything_3` |
+| `depth_pro` | Apple Depth Pro | bundled in `uv sync` |
 
 ## Library
 

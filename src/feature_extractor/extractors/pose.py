@@ -216,7 +216,7 @@ class PoseExtractor:
 
         batch = torch.stack(tensors, dim=0)
         autocast_ctx = (
-            torch.cuda.amp.autocast(dtype=self.autocast_dtype)
+            torch.amp.autocast(self.device.type, dtype=self.autocast_dtype)
             if self.autocast_dtype is not None
             else contextlib.nullcontext()
         )
@@ -311,7 +311,7 @@ class PoseExtractor:
         img_tensor = (img_tensor - mean) / std
 
         autocast_ctx = (
-            torch.cuda.amp.autocast(dtype=self.autocast_dtype)
+            torch.amp.autocast(self.device.type, dtype=self.autocast_dtype)
             if self.autocast_dtype is not None
             else contextlib.nullcontext()
         )
@@ -373,7 +373,7 @@ class PoseExtractor:
         img_tensor = (img_tensor - mean) / std
 
         autocast_ctx = (
-            torch.cuda.amp.autocast(dtype=self.autocast_dtype)
+            torch.amp.autocast(self.device.type, dtype=self.autocast_dtype)
             if self.autocast_dtype is not None
             else contextlib.nullcontext()
         )

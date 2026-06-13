@@ -457,11 +457,24 @@ class DepthExtractor:
         elif self.mode == "depth_pro" and self.depth_pro_model is not None:
             depth_map = self._extract_depth_pro(image)
         else:
-            # Fallback: DINO attention proxy
-            _warn_once(
-                f"depth_frame_dino_attention:{self.mode}",
-                f"Depth fallback: using DINO attention proxy for frame depth because mode={self.mode!r} has no loaded model.",
-            )
+            # DINO attention proxy. This is the intended behavior for
+            # mode='dino_attention' (the default), not a model-load failure;
+            # it produces a depth *proxy* from DINO attention, not geometric
+            # depth. Pass --depth_mode video_depth_anything/da3/depth_pro for
+            # a real depth model.
+            if self.mode == "dino_attention":
+                _warn_once(
+                    "depth_frame_dino_attention_proxy",
+                    "Depth: mode='dino_attention' produces a DINO-attention proxy, "
+                    "not geometric depth. Use --depth_mode video_depth_anything/da3/depth_pro "
+                    "for a real depth model.",
+                )
+            else:
+                _warn_once(
+                    f"depth_frame_dino_attention:{self.mode}",
+                    f"Depth fallback: mode={self.mode!r} has no loaded model; "
+                    "falling back to the DINO attention proxy.",
+                )
             depth_map = self._extract_dino_attention(image, h, w)
 
         inv_depth = self._to_inverse_depth(depth_map)
