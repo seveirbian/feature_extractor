@@ -519,7 +519,7 @@ class PoseExtractor:
         Translation is the relative extrinsic translation term from VGGT and
         remains in VGGT's normalized scene scale, not metric meters.
         """
-        from decord import VideoReader, cpu
+        from ..video_io import VideoReader, cpu
 
         vr = VideoReader(video_path, ctx=cpu(0))
         total_frames = len(vr)

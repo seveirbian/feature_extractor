@@ -668,7 +668,7 @@ class DepthExtractor:
         Returns:
             inv_depths: (T, H, W, 1) float32.
         """
-        from decord import VideoReader, cpu
+        from ..video_io import VideoReader, cpu
 
         vr = VideoReader(video_path, ctx=cpu(0))
         total_frames = len(vr)

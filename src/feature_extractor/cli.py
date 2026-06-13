@@ -62,7 +62,7 @@ def create_annotation(
 ) -> dict:
     """Create a minimal annotation stub for a video (no labels)."""
     try:
-        from decord import VideoReader, cpu
+        from .video_io import VideoReader, cpu
 
         vr = VideoReader(video_path, ctx=cpu(0))
         num_frames = len(vr)
@@ -90,7 +90,7 @@ def create_annotation(
 
 def sample_frame_indices(video_path: str, frames_per_video: int | None) -> list[int]:
     """Choose original video frame indices once so every branch aligns."""
-    from decord import VideoReader, cpu
+    from .video_io import VideoReader, cpu
 
     vr = VideoReader(video_path, ctx=cpu(0))
     total_frames = len(vr)

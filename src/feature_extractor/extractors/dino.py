@@ -315,7 +315,7 @@ class DINOExtractor:
         Returns:
             features: numpy array, shape (T, N_patches + 1, embed_dim).
         """
-        from decord import VideoReader, cpu
+        from ..video_io import VideoReader, cpu
 
         vr = VideoReader(video_path, ctx=cpu(0))
         total_frames = len(vr)
