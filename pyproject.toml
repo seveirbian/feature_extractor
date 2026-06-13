@@ -48,6 +48,7 @@ explicit = true
 
 [project.scripts]
 feature-extract = "feature_extractor.cli:main"
+feature-validate = "feature_extractor.validation.cli:main"
 
 [build-system]
 requires = ["hatchling"]
