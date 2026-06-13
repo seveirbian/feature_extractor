@@ -34,6 +34,10 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8.0.0"]
 
+[tool.pytest.ini_options]
+# 只收集本仓库的 tests/,避免误收 third_party 子模块里的测试
+testpaths = ["tests"]
+
 # Pin torch/torchvision to a CUDA 12.4 build. The default index ships
 # +cu130 wheels that need a driver newer than this host's CUDA 12.5
 # driver (535.x), which silently falls back to CPU.
