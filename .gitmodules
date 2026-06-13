@@ -14,7 +14,3 @@
 	path = third_party/ml-depth-pro
 	url = https://github.com/apple/ml-depth-pro.git
 	ignore = untracked
-[submodule "third_party/openego"]
-	path = third_party/openego
-	url = https://github.com/ahadjawaid/openego.git
-	ignore = untracked
