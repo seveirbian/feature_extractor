@@ -25,7 +25,7 @@ def render_report(meta: dict, checks: list, perf: list) -> str:
     lines.append("# feature_extractor 验证报告")
     lines.append("")
     lines.append(f"- 日期:{meta.get('date', '')}")
-    lines.append(f"- Git commit:`{meta.get('commit', '')}`")
+    lines.append(f"- Git commit:`{meta.get('commit', '')}`　主机:{meta.get('host', '')}")
     lines.append(f"- GPU:{meta.get('gpu', '')}　torch:{meta.get('torch', '')}"
                  f"　CUDA:{meta.get('cuda', '')}")
     lines.append(f"- 依赖:{meta.get('deps', '')}")

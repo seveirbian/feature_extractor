@@ -80,7 +80,8 @@ def run_sanity(branches, depth_mode, device, assets_root) -> list[sanity.CheckRe
             return checks
 
         indices_by_branch = {}
-        if dino is not None and "dino" in branches:
+        # 确定性检查仅覆盖 dino/depth(spec 约定);pose 不做两次比对。
+        if dino is not None:  # dino 仅在请求 dino 分支时非 None(depth 骨干不计)
             try:
                 f = dino.extract_video(vid, frame_indices=idx)
                 checks += sanity.check_dino(f)
