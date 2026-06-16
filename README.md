@@ -164,10 +164,25 @@ CUDA_VISIBLE_DEVICES=7 uv run feature-extract \
 | `--id_from_stem` | 关 | video_id 只用文件名 stem(见第 4 节命名冲突) |
 | `--num_samples` | 全部 | 只处理前 N 个视频(调试用) |
 | `--resume` | 关 | 跳过已存在的输出 |
-| `--dino_model` | `dinov3_vits16plus` | DINO 模型 |
+| `--dino_model` | `dinov3_vits16plus` | DINO 模型(见下方可选 backbone) |
 | `--vda_input_size` | `224` | Video-Depth-Anything 输入边长 |
 | `--assets_root` | 无 | 覆盖模型资源根目录 |
 | `--annotation_dir` | `<output_root>/annotations` | 标注输出目录 |
+
+### 可选 DINO backbone
+
+| `--dino_model` | 架构 | 权重文件(放 `third_party/dinov3/checkpoints/`) |
+|----------------|------|-----------------------------------------------|
+| `dinov3_vits16plus`(默认) | DINOv3 ViT-S+/16,embed_dim 384 | `dinov3_vits16plus_pretrain_lvd1689m-4057cbaa.pth` |
+| `dinov3_vits16` | DINOv3 ViT-S/16(更轻),embed_dim 384 | `dinov3_vits16_pretrain_lvd1689m-08c60483.pth` |
+
+两者输出形状一致(`(T, 1025, 384)`)。也可用 HF 风格别名,如
+`--dino_model facebook/dinov3-vits16-pretrain-lvd1689m`。
+
+DINOv3 权重**许可受限**,从 Meta 官方下载页(同意许可后邮件发 URL,用 `wget`)
+获取,或 HuggingFace gated 仓库 `facebook/dinov3-vits16-pretrain-lvd1689m`。优先用
+Meta 官方 `.pth`(`dl.fbaipublicfiles.com/dinov3/dinov3_vits16/...`),其 key 与 vendored
+仓库的 builder 严格匹配。
 
 ## 7. 深度模式(`--depth_mode`)
 
