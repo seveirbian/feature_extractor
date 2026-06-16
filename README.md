@@ -169,20 +169,46 @@ CUDA_VISIBLE_DEVICES=7 uv run feature-extract \
 | `--assets_root` | 无 | 覆盖模型资源根目录 |
 | `--annotation_dir` | `<output_root>/annotations` | 标注输出目录 |
 
-### 可选 DINO backbone
+### DINO backbone(`--dino_model`)
+
+可选的 DINOv3 backbone:
 
 | `--dino_model` | 架构 | 权重文件(放 `third_party/dinov3/checkpoints/`) |
 |----------------|------|-----------------------------------------------|
 | `dinov3_vits16plus`(默认) | DINOv3 ViT-S+/16,embed_dim 384 | `dinov3_vits16plus_pretrain_lvd1689m-4057cbaa.pth` |
 | `dinov3_vits16` | DINOv3 ViT-S/16(更轻),embed_dim 384 | `dinov3_vits16_pretrain_lvd1689m-08c60483.pth` |
 
-两者输出形状一致(`(T, 1025, 384)`)。也可用 HF 风格别名,如
-`--dino_model facebook/dinov3-vits16-pretrain-lvd1689m`。
+两者输出形状一致(`(T, 1025, 384)`)。`--dino_model` 接受规范名,也接受 HF 风格别名
+(如 `facebook/dinov3-vits16-pretrain-lvd1689m`、`dinov3-vits16`)。
 
-DINOv3 权重**许可受限**,从 Meta 官方下载页(同意许可后邮件发 URL,用 `wget`)
-获取,或 HuggingFace gated 仓库 `facebook/dinov3-vits16-pretrain-lvd1689m`。优先用
-Meta 官方 `.pth`(`dl.fbaipublicfiles.com/dinov3/dinov3_vits16/...`),其 key 与 vendored
-仓库的 builder 严格匹配。
+**命令行**:
+
+```bash
+# 默认 vits16plus(不传 --dino_model 即可)
+CUDA_VISIBLE_DEVICES=7 uv run feature-extract \
+    --data_root data/clips --output_root data/features --branches dino
+
+# 改用更轻的 vits16
+CUDA_VISIBLE_DEVICES=7 uv run feature-extract \
+    --data_root data/clips --output_root data/features --branches dino \
+    --dino_model dinov3_vits16
+```
+
+**作为库**:
+
+```python
+from feature_extractor import DINOExtractor
+
+dino = DINOExtractor(model_name="dinov3_vits16", device="cuda")   # 或 dinov3_vits16plus
+feats = dino.extract_video("clip.mp4", frame_indices=[0, 8, 16])  # (3, 1025, 384)
+```
+
+**获取权重**:DINOv3 权重**许可受限**。从 Meta 官方下载页
+(同意许可后邮件发 URL,官方要求用 `wget`)获取,或 HuggingFace gated 仓库
+`facebook/dinov3-vits16-pretrain-lvd1689m`。**优先用 Meta 官方 `.pth`**
+(`https://dl.fbaipublicfiles.com/dinov3/dinov3_vits16/dinov3_vits16_pretrain_lvd1689m-08c60483.pth`),
+其 state_dict key 与 vendored 仓库 builder 严格匹配(`strict=True` 直接可加载);HF 那份打包
+格式可能不同,需额外映射。下好后放到上表对应的文件名路径即可,无需改代码。
 
 ## 7. 深度模式(`--depth_mode`)
 
