@@ -151,6 +151,21 @@ CUDA_VISIBLE_DEVICES=7 uv run feature-extract \
     --id_from_stem
 ```
 
+选择 DINO 权重(默认 `dinov3_vits16plus`,加 `--dino_model` 切换;详见下方「DINO backbone」):
+
+```bash
+# 用更轻的 dinov3_vits16(权重须已放在 third_party/dinov3/checkpoints/)
+CUDA_VISIBLE_DEVICES=7 uv run feature-extract \
+    --data_root data/openego/videos \
+    --output_root data/features \
+    --branches dino,depth,pose \
+    --depth_mode video_depth_anything \
+    --frames_per_video 64 \
+    --id_from_stem \
+    --dino_model dinov3_vits16
+# 也可用 HF 风格别名:--dino_model facebook/dinov3-vits16-pretrain-lvd1689m
+```
+
 常用参数:
 
 | 参数 | 默认 | 说明 |
