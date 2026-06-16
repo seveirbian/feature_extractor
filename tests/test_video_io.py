@@ -103,3 +103,10 @@ def test_pyav_out_of_range_raises(av1_video):
     vr = VideoReader(av1_video, ctx=cpu(0))
     with pytest.raises(IndexError):
         vr[N_FRAMES]
+
+
+@pytest.mark.parametrize("fixture", ["av1_video", "h264_video"])
+def test_get_avg_fps(fixture, request):
+    # 合成视频以 rate=10 编码;两种后端都应报告 ~10 fps
+    vr = VideoReader(request.getfixturevalue(fixture), ctx=cpu(0))
+    assert abs(vr.get_avg_fps() - 10.0) < 0.5

@@ -77,6 +77,8 @@ class VideoReader:
             if self._stream.frames and self._stream.frames > 0
             else self._count_pyav_frames()
         )
+        rate = self._stream.average_rate or self._stream.guessed_rate
+        self._avg_fps = float(rate) if rate else 0.0
         self._reset_decoder()
 
     def _count_pyav_frames(self) -> int:
@@ -120,3 +122,9 @@ class VideoReader:
         if self._decord is not None:
             return self._decord[i]
         return self._get_pyav(int(i))
+
+    def get_avg_fps(self) -> float:
+        """Average frames-per-second (decord-compatible)."""
+        if self._decord is not None:
+            return float(self._decord.get_avg_fps())
+        return self._avg_fps
