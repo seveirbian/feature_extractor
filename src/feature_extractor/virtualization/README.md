@@ -15,8 +15,15 @@ CUDA_VISIBLE_DEVICES=7 uv run python src/feature_extractor/virtualization/export
     --video_path  path/to/clip.mp4 \
     --output_mp4  /tmp/dino_vis.mp4 \
     --dino_model  dinov3_vits16 \
-    --render_scale 0.5
+    --render_scale 0.5 \
+    --max_frames  200          # 长视频务必限制帧数,否则会逐帧跑完整段
 ```
+
+> ⚠️ **长视频必看**:不加 `--max_frames` 会处理**每一帧**。比如 10 万帧的视频会逐帧跑
+> DINO(数小时),实际上等不到输出。先用 `--max_frames` 看一小段:
+> - 看开头连续片段:`--max_frames 200`(默认 stride=1)
+> - 均匀采样看全片走向:`--frame_stride 1000 --max_frames 100`
+> - 看中间某段:`--start_frame 5000 --max_frames 200`
 
 ## 参数
 
@@ -29,6 +36,9 @@ CUDA_VISIBLE_DEVICES=7 uv run python src/feature_extractor/virtualization/export
 | `--device` | `cuda` | 计算设备 |
 | `--render_scale` | `1.0` | 输出相对原分辨率的缩放;长视频/大图建议调小加速 |
 | `--panel_mode` | `rgb_pca_cls` | `rgb_pca`(原帧+PCA)或 `rgb_pca_cls`(再加 CLS 相似度) |
+| `--start_frame` | `0` | 起始帧 |
+| `--frame_stride` | `1` | 抽帧步长(>1 时为均匀采样,输出相当于快进) |
+| `--max_frames` | 全部 | 最多处理多少帧;**长视频务必设置** |
 
 ## 输出
 
@@ -37,8 +47,8 @@ CUDA_VISIBLE_DEVICES=7 uv run python src/feature_extractor/virtualization/export
 
 ## 注意
 
-- **整段抽帧**:脚本对视频的**每一帧**都跑 DINO,长视频(上万帧)会很慢、显存/耗时高;
-  建议先用短片或截取片段。
+- **默认整段抽帧**:不限制时脚本对**每一帧**都跑 DINO,长视频会很慢;用
+  `--max_frames`/`--frame_stride`/`--start_frame` 限定范围(见上)。
 - **AV1**:经 `feature_extractor.video_io` 解码,AV1 走 PyAV(libdav1d)回退,无需额外处理。
 - **权重**:`--dino_model` 对应的权重需已放在 `third_party/dinov3/checkpoints/`
   (获取方式见仓库根 README)。
