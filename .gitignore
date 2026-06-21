@@ -11,3 +11,7 @@ wheels/
 
 # Input videos and extracted feature outputs
 /data
+
+# Vendored third_party model weights (downloaded separately; see README).
+# No trailing slash: also ignores the machine-specific checkpoints symlink.
+third_party/*/checkpoints
