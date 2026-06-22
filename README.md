@@ -33,32 +33,33 @@ src/feature_extractor/
 ## 2. 安装
 
 ```bash
-# 克隆时带上子模块,或克隆后再初始化:
-git submodule update --init --recursive
 uv sync
 ```
 
+`third_party/` 下的第三方模型源码已**内置在仓库**(精简 vendored,无 git 子模块)。
 模型权重不在 git 里,需另行获取(见第 3 节)。
 
 ## 3. 模型资源(third_party/)
 
-提取器依赖四个内置模型仓库,以 **git 子模块**形式放在 `third_party/` 下
-(`dinov3`、`Video-Depth-Anything`、`ml-depth-pro`、`VGGT`)。
+- **DINO**:走 HuggingFace `transformers`(PyPI 依赖,已随 `uv sync` 安装),**不在** `third_party/`;
+  权重为 HF 格式,获取方式见第 6 节「DINO backbone」。
+- **VGGT / Video-Depth-Anything / ml-depth-pro**:精简后的 **vendored 源码内置**在
+  `third_party/<repo>/`(非子模块;裁剪溯源见 `third_party/PROVENANCE.md`)。
 
 ### 权重文件(不在 git 里)
 
-各后端期望权重位于 `third_party/<repo>/checkpoints/` 下。权重托管在华为云 OBS,
-在仓库根目录用 [`obsutil`](https://support.huaweicloud.com/utiltg-obs/obs_11_0003.html)
-下载(先 `obsutil config` 配 AK/SK):
+vendored 后端权重位于 `third_party/<repo>/checkpoints/`,托管在华为云 OBS,在仓库根目录用
+[`obsutil`](https://support.huaweicloud.com/utiltg-obs/obs_11_0003.html) 下载(先 `obsutil config` 配 AK/SK):
 
 ```bash
-obsutil cp obs://cloudrobo-model/wangchao/egoWM/third_party/dinov3/checkpoints               ./third_party/dinov3/checkpoints               -r -f
 obsutil cp obs://cloudrobo-model/wangchao/egoWM/third_party/Video-Depth-Anything/checkpoints ./third_party/Video-Depth-Anything/checkpoints -r -f
 obsutil cp obs://cloudrobo-model/wangchao/egoWM/third_party/ml-depth-pro/checkpoints          ./third_party/ml-depth-pro/checkpoints          -r -f
 obsutil cp obs://cloudrobo-model/wangchao/egoWM/third_party/VGGT/checkpoints                  ./third_party/VGGT/checkpoints                  -r -f
 ```
 
-只用部分后端时只下对应的几行(`dino` 需 DINOv3 HF 权重;默认 depth `video_depth_anything`
+**DINO(HF)权重单独获取**(`hf download ...`),见第 6 节。
+
+只用部分后端时只下对应的几行(`dino` 需 DINOv3 HF 权重,见第 6 节;默认 depth `video_depth_anything`
 需 `Video-Depth-Anything` + `ml-depth-pro`;`pose` 需 `VGGT`)。
 
 ### 指向其他位置
@@ -269,4 +270,5 @@ feats = dino.extract_video("clip.mp4", frame_indices=[0, 8, 16])  # (3, N+1, 384
   自验证报告里单列了 `decode` 行可据此拆分。
 - **依赖钉版**:`numpy<2`(vendored VGGT 要求);torch/torchvision 钉 CUDA 12.4 wheel
   (见 `pyproject.toml`,避免在 12.5 驱动上回退 CPU)。
-- **third_party 是子模块 + 外部权重**:换机器需重新 `submodule update --init` 并下权重。
+- **权重外置**:third_party 第三方源码已 vendored 进仓库,但模型权重不在 git 里;换机器需按
+  第 3 / 6 节重新下载(VGGT/VDA/depth-pro 走 OBS,DINO 走 HF)。
