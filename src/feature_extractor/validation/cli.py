@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import shutil
 import socket
 import subprocess
 import sys
@@ -29,8 +30,12 @@ def _env_meta(command: str) -> dict:
         except Exception:
             return default
     gpu = _safe(lambda: torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu")
-    commit = _safe(lambda: subprocess.check_output(
-        ["git", "rev-parse", "--short", "HEAD"]).decode().strip())
+    git_exe = shutil.which("git")  # resolve absolute path; don't invoke a bare PATH-resolved name
+    commit = (
+        _safe(lambda: subprocess.check_output(
+            [git_exe, "rev-parse", "--short", "HEAD"]).decode().strip())
+        if git_exe else "?"
+    )
     deps = ", ".join(f"{p}={_safe(lambda p=p: metadata.version(p))}"
                      for p in ("av", "decord", "torch"))
     return {
