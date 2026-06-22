@@ -230,16 +230,46 @@ feats = dino.extract_video("clip.mp4", frame_indices=[0, 8, 16])  # (3, 1025, 38
 ### HuggingFace 后端(可选)
 
 `*_hf` 变体用 `transformers` 的原生 DINOv3 实现,输出与 vendored 同契约
-(`(T, 1025, 384)`,已剔除 register tokens)。需要:
+(`(T, 1025, 384)`,已剔除 register tokens)。`transformers` 已在依赖中。
 
-- `transformers`(已在依赖中);
-- **本地 HF 格式权重目录**(`config.json` + `*.safetensors`)放在上表对应路径
-  (`third_party/dinov3/checkpoints/dinov3-vits16-hf/` 等)——可从 HF 仓库
-  `facebook/dinov3-vits16-pretrain-lvd1689m`(gated)下载后置于该目录,离线加载。
+**1) 准备本地 HF 格式权重**(`config.json` + `*.safetensors`),放到上表对应目录。
+HF 仓库是 gated,需先在 huggingface.co 同意许可、再登录下载:
 
 ```bash
-uv run feature-extract --branches dino --dino_model dinov3_vits16_hf ...
+uv run hf auth login        # 或 huggingface-cli login,输入有访问权的 token
+uv run hf download facebook/dinov3-vits16-pretrain-lvd1689m \
+    --local-dir third_party/dinov3/checkpoints/dinov3-vits16-hf
+# vits16plus 同理 → dinov3-vits16plus-hf/
 ```
+
+**2) 用它跑特征提取**:
+
+```bash
+CUDA_VISIBLE_DEVICES=7 uv run feature-extract \
+    --data_root data/clips --output_root data/features \
+    --branches dino --dino_model dinov3_vits16_hf
+```
+
+**3) 快速验证**(权重到位后,确认能加载、输出 `(T, 1025, 384)`):
+
+```bash
+CUDA_VISIBLE_DEVICES=7 uv run python -c "
+from feature_extractor.extractors.dino import DINOExtractor
+from feature_extractor.validation.synthetic import make_gradient_video
+from feature_extractor.validation import sanity
+import tempfile, pathlib
+ex = DINOExtractor(model_name='dinov3_vits16_hf', device='cuda')
+with tempfile.TemporaryDirectory() as td:
+    v = str(pathlib.Path(td)/'g.mp4'); make_gradient_video(v, n_frames=6)
+    f = ex.extract_video(v, frame_indices=list(range(6)))
+print('shape', f.shape)
+assert all(c.passed for c in sanity.check_dino(f))
+print('HF backend OK')
+"
+```
+
+> 缺权重目录会明确报错 `DINOv3 HF weights dir not found: ...`。`feature-validate` 目前固定用
+> vits16plus,选 HF 后端请用上面的 `feature-extract` 或验证片段。
 
 vendored 后端(`dinov3_vits16` / `dinov3_vits16plus`)与 `facebook/*` 别名行为不变。
 
