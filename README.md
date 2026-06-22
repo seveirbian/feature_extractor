@@ -13,7 +13,7 @@
 | 分支 | 内容 | 模型 |
 |------|------|------|
 | `dino` | 逐帧 DINOv3 patch token 特征(视觉表征) | DINOv3(默认 `dinov3_vits16plus`) |
-| `depth` | 逐帧**归一化逆深度**图 | 见下方「深度模式」(默认 `dino_attention` 代理;真实深度用 `video_depth_anything` 等) |
+| `depth` | 逐帧**归一化逆深度**图 | 见下方「深度模式」(默认 `video_depth_anything`) |
 | `pose` | 相对第 0 帧的**相机位姿轨迹**(平移 + 6D 旋转) | VGGT |
 
 三个分支共享**同一组帧索引**,保证跨分支严格对齐。
@@ -58,7 +58,7 @@ obsutil cp obs://cloudrobo-model/wangchao/egoWM/third_party/ml-depth-pro/checkpo
 obsutil cp obs://cloudrobo-model/wangchao/egoWM/third_party/VGGT/checkpoints                  ./third_party/VGGT/checkpoints                  -r -f
 ```
 
-只用部分后端时只下对应的几行(默认 `dino_attention` 不需任何权重;`video_depth_anything`
+只用部分后端时只下对应的几行(`dino` 需 DINOv3 HF 权重;默认 depth `video_depth_anything`
 需 `Video-Depth-Anything` + `ml-depth-pro`;`pose` 需 `VGGT`)。
 
 ### 指向其他位置
@@ -173,7 +173,7 @@ CUDA_VISIBLE_DEVICES=7 uv run feature-extract \
 | `--data_root` | 必填 | 递归查找视频的根目录 |
 | `--output_root` | 必填 | 输出目录 |
 | `--branches` | `dino,depth,pose` | 要跑的分支 |
-| `--depth_mode` | `dino_attention` | 深度后端(见第 7 节) |
+| `--depth_mode` | `video_depth_anything` | 深度后端(见第 7 节) |
 | `--frames_per_video` | `120` | 每视频最多采样帧数 |
 | `--device` | `cuda` | 计算设备 |
 | `--id_from_stem` | 关 | video_id 只用文件名 stem(见第 4 节命名冲突) |
@@ -186,57 +186,20 @@ CUDA_VISIBLE_DEVICES=7 uv run feature-extract \
 
 ### DINO backbone(`--dino_model`)
 
-可选的 DINOv3 backbone:
+DINO 用 HuggingFace `transformers` 的原生 DINOv3 实现(`transformers` 已在依赖中)。可选两个:
 
-| `--dino_model` | 架构 | 权重文件(放 `third_party/dinov3/checkpoints/`) |
-|----------------|------|-----------------------------------------------|
-| `dinov3_vits16plus`(默认) | DINOv3 ViT-S+/16,embed_dim 384 | `dinov3_vits16plus_pretrain_lvd1689m-4057cbaa.pth` |
-| `dinov3_vits16` | DINOv3 ViT-S/16(更轻),embed_dim 384 | `dinov3_vits16_pretrain_lvd1689m-08c60483.pth` |
-| `dinov3_vits16_hf` | DINOv3 ViT-S/16(HuggingFace 后端) | 本地 HF 格式目录 `dinov3-vits16-hf/` |
-| `dinov3_vits16plus_hf` | DINOv3 ViT-S+/16(HuggingFace 后端) | 本地 HF 格式目录 `dinov3-vits16plus-hf/` |
+| `--dino_model` | 架构 | 权重(本地 HF 格式目录) |
+|----------------|------|-------------------------|
+| `dinov3_vits16plus`(默认) | DINOv3 ViT-S+/16,embed_dim 384 | `third_party/dinov3/checkpoints/dinov3-vits16plus-hf/` |
+| `dinov3_vits16` | DINOv3 ViT-S/16(更轻),embed_dim 384 | `third_party/dinov3/checkpoints/dinov3-vits16-hf/` |
 
-各变体输出形状一致(`(T, 1025, 384)`)。`--dino_model` 接受规范名,也接受 HF 风格别名
-(如 `facebook/dinov3-vits16-pretrain-lvd1689m`、`dinov3-vits16`)。
+两者输出形状一致(`(T, 1025, 384)` = CLS + 1024 patch,已剔除 register tokens)。
+`--dino_model` 也接受 HF 风格别名(如 `facebook/dinov3-vits16-pretrain-lvd1689m`、`dinov3-vits16`)。
 
-**命令行**:
-
-```bash
-# 默认 vits16plus(不传 --dino_model 即可)
-CUDA_VISIBLE_DEVICES=7 uv run feature-extract \
-    --data_root data/clips --output_root data/features --branches dino
-
-# 改用更轻的 vits16
-CUDA_VISIBLE_DEVICES=7 uv run feature-extract \
-    --data_root data/clips --output_root data/features --branches dino \
-    --dino_model dinov3_vits16
-```
-
-**作为库**:
-
-```python
-from feature_extractor import DINOExtractor
-
-dino = DINOExtractor(model_name="dinov3_vits16", device="cuda")   # 或 dinov3_vits16plus
-feats = dino.extract_video("clip.mp4", frame_indices=[0, 8, 16])  # (3, 1025, 384)
-```
-
-**获取权重**:DINOv3 权重**许可受限**。从 Meta 官方下载页
-(同意许可后邮件发 URL,官方要求用 `wget`)获取,或 HuggingFace gated 仓库
-`facebook/dinov3-vits16-pretrain-lvd1689m`。**优先用 Meta 官方 `.pth`**
-(`https://dl.fbaipublicfiles.com/dinov3/dinov3_vits16/dinov3_vits16_pretrain_lvd1689m-08c60483.pth`),
-其 state_dict key 与 vendored 仓库 builder 严格匹配(`strict=True` 直接可加载);HF 那份打包
-格式可能不同,需额外映射。下好后放到上表对应的文件名路径即可,无需改代码。
-
-### HuggingFace 后端(可选)
-
-`*_hf` 变体用 `transformers` 的原生 DINOv3 实现,输出与 vendored 同契约
-(`(T, 1025, 384)`,已剔除 register tokens)。`transformers` 已在依赖中。
-
-**1) 准备本地 HF 格式权重**(`config.json` + `*.safetensors`),放到上表对应目录。
-HF 仓库是 gated,需先在 huggingface.co 同意许可、再登录下载:
+**1) 准备本地 HF 格式权重**(`config.json` + `*.safetensors`)。HF 仓库是 gated,需先在
+huggingface.co 同意许可、再登录下载(在仓库根目录执行;`hf` 是 huggingface_hub 自带 CLI):
 
 ```bash
-# 在仓库根目录执行;hf 是 huggingface_hub 自带 CLI(已随依赖安装)
 uv run hf auth login        # 输入有该 gated 仓库访问权的 token
 uv run hf download facebook/dinov3-vits16-pretrain-lvd1689m \
     --local-dir third_party/dinov3/checkpoints/dinov3-vits16-hf
@@ -244,49 +207,32 @@ uv run hf download facebook/dinov3-vits16-pretrain-lvd1689m \
 ```
 
 > 代码按约定查找 `<assets_root>/third_party/dinov3/checkpoints/dinov3-vits16-hf`
-> (`assets_root` 默认=仓库根)。把权重放到别处时,用 `--assets_root /ROOT`
-> 或 `FEATURE_EXTRACTOR_ASSETS=/ROOT`(仅改根,子路径不变),或把该约定路径软链过去。
+> (`assets_root` 默认=仓库根)。放别处时用 `--assets_root /ROOT` 或
+> `FEATURE_EXTRACTOR_ASSETS=/ROOT`(仅改根,子路径不变),或把该约定路径软链过去。
+> 缺目录会明确报错 `DINOv3 HF weights dir not found: ...`。
 
-**2) 用它跑特征提取**:
+**2) 命令行 / 库用法**:
 
 ```bash
 CUDA_VISIBLE_DEVICES=7 uv run feature-extract \
     --data_root data/clips --output_root data/features \
-    --branches dino --dino_model dinov3_vits16_hf
+    --branches dino --dino_model dinov3_vits16
 ```
 
-**3) 快速验证**(权重到位后,确认能加载、输出 `(T, 1025, 384)`):
+```python
+from feature_extractor import DINOExtractor
 
-```bash
-CUDA_VISIBLE_DEVICES=7 uv run python -c "
-from feature_extractor.extractors.dino import DINOExtractor
-from feature_extractor.validation.synthetic import make_gradient_video
-from feature_extractor.validation import sanity
-import tempfile, pathlib
-ex = DINOExtractor(model_name='dinov3_vits16_hf', device='cuda')
-with tempfile.TemporaryDirectory() as td:
-    v = str(pathlib.Path(td)/'g.mp4'); make_gradient_video(v, n_frames=6)
-    f = ex.extract_video(v, frame_indices=list(range(6)))
-print('shape', f.shape)
-assert all(c.passed for c in sanity.check_dino(f))
-print('HF backend OK')
-"
+dino = DINOExtractor(model_name="dinov3_vits16", device="cuda")   # 或 dinov3_vits16plus(默认)
+feats = dino.extract_video("clip.mp4", frame_indices=[0, 8, 16])  # (3, 1025, 384)
 ```
-
-> 缺权重目录会明确报错 `DINOv3 HF weights dir not found: ...`。`feature-validate` 目前固定用
-> vits16plus,选 HF 后端请用上面的 `feature-extract` 或验证片段。
-
-vendored 后端(`dinov3_vits16` / `dinov3_vits16plus`)与 `facebook/*` 别名行为不变。
 
 ## 7. 深度模式(`--depth_mode`)
 
-默认 `dino_attention` 是 **DINO 注意力代理**——快且无额外依赖,但**不是**几何深度。
-真实深度请选模型后端(其权重须已在 `third_party/.../checkpoints/`):
+默认 `video_depth_anything`(需对应权重)。各模式权重须已在 `third_party/.../checkpoints/`:
 
 | 模式 | 后端 | 额外依赖 |
 |------|------|---------|
-| `dino_attention`(默认) | DINO 注意力代理 | 无 |
-| `video_depth_anything` | Video Depth Anything(`vitl`)+ Depth Pro 度量校正 | 已含在 `uv sync` |
+| `video_depth_anything`(默认) | Video Depth Anything(`vitl`)+ Depth Pro 度量校正 | 已含在 `uv sync` |
 | `da3` | Depth Anything V3 | `pip install depth_anything_3` |
 | `depth_pro` | Apple Depth Pro | 已含在 `uv sync` |
 
