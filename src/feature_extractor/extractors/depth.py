@@ -105,46 +105,25 @@ def _load_video_depth_anything(
 # Depth Pro (metric depth on keyframes)
 # ----------------------------------------------------------------------
 def _load_depth_pro(device: torch.device, assets_root=None):
-    """Load Depth Pro model."""
+    """Load Apple Depth Pro via HuggingFace transformers from a local HF-format dir."""
     try:
-        import sys
-        from dataclasses import replace
-
-        project_root = resolve_assets_root(assets_root)
-        local_src = project_root / "third_party" / "ml-depth-pro" / "src"
-        checkpoint_path = project_root / "third_party" / "ml-depth-pro" / "checkpoints" / "depth_pro.pt"
-        if local_src.exists() and str(local_src) not in sys.path:
-            sys.path.insert(0, str(local_src))
-        try:
-            import depth_pro
-
-            config = replace(
-                depth_pro.depth_pro.DEFAULT_MONODEPTH_CONFIG_DICT,
-                checkpoint_uri=str(checkpoint_path),
-            )
-            precision = torch.float16 if device.type == "cuda" else torch.float32
-            model, transform = depth_pro.create_model_and_transforms(
-                config=config,
-                device=device,
-                precision=precision,
-            )
-            model = model.to(device)
-            model.eval()
-            return model, transform
-        except Exception as e:
-            _warn_once(
-                "depth_pro_load_failed",
-                f"Depth fallback: failed to load Depth Pro metric model; metric correction/keyframe depth is unavailable. Error: {e}",
-            )
-            print(f"[DepthExtractor] Failed to load Depth Pro: {e}")
-            return None, None
-    except Exception as e:
-        _warn_once(
-            "depth_pro_loader_init_failed",
-            f"Depth fallback: failed to initialize Depth Pro loader; metric correction/keyframe depth is unavailable. Error: {e}",
+        from transformers import AutoImageProcessor, DepthProForDepthEstimation
+    except ImportError as e:
+        raise RuntimeError(
+            "Depth Pro HF backend 需要 transformers(>=4.56)。请 `uv sync` 或 `pip install transformers`。"
+        ) from e
+    hf_dir = resolve_assets_root(assets_root) / "third_party" / "ml-depth-pro" / "checkpoints" / "depth-pro-hf"
+    if not hf_dir.exists():
+        raise FileNotFoundError(
+            f"Depth Pro HF weights dir not found: {hf_dir}. "
+            "请放入 HF 格式权重(config.json + safetensors),来源 HF 仓库 apple/DepthPro-hf。"
         )
-        print(f"[DepthExtractor] Failed to initialize Depth Pro loader: {e}")
-        return None, None
+    processor = AutoImageProcessor.from_pretrained(str(hf_dir))
+    model = DepthProForDepthEstimation.from_pretrained(str(hf_dir), use_fov_model=False)
+    model = model.to(device)
+    model.eval()
+    print(f"[DepthExtractor] Loaded Depth Pro (HF): {hf_dir}")
+    return model, processor
 
 
 class DepthExtractor:
@@ -193,16 +172,16 @@ class DepthExtractor:
 
         self.model = self._load_model()
         self.depth_pro_model = None
-        self.depth_pro_transform = None
+        self.depth_pro_processor = None
         # VDA temporal buffer: store previous N frames for sliding-window inference
         self._vda_buffer = []  # list of (frame_tensor, original_hw)
         self._vda_buffer_max = 31  # keep enough for INFER_LEN=32 overlap
         if self.mode in ("da3", "video_depth_anything", "depth_pro"):
-            self.depth_pro_model, self.depth_pro_transform = _load_depth_pro(self.device, self.assets_root)
+            self.depth_pro_model, self.depth_pro_processor = _load_depth_pro(self.device, self.assets_root)
         if self.mode == "video_depth_anything":
             if self.model is None:
                 raise RuntimeError("Video Depth Anything failed to load; refusing to fall back for depth extraction.")
-            if self.depth_pro_model is None or self.depth_pro_transform is None:
+            if self.depth_pro_model is None or self.depth_pro_processor is None:
                 raise RuntimeError("Depth Pro failed to load; video depth mode requires Depth Pro keyframe metric correction.")
 
     def _load_model(self):
@@ -287,7 +266,7 @@ class DepthExtractor:
         frame_indices: list[int],
     ) -> np.ndarray:
         """Calibrate temporally consistent VDA depth with sparse metric Depth Pro keyframes."""
-        if self.depth_pro_model is None or self.depth_pro_transform is None:
+        if self.depth_pro_model is None or self.depth_pro_processor is None:
             raise RuntimeError("Depth Pro is required to metricize Video Depth Anything outputs.")
 
         num_frames = len(frames)
@@ -465,44 +444,27 @@ class DepthExtractor:
         return depth_raw[-1, 0].cpu().numpy().astype(np.float32)
 
     def _extract_depth_pro(self, image: np.ndarray) -> np.ndarray:
-        """Run Depth Pro on a single frame for metric depth."""
+        """Run Depth Pro (HF) on a single frame for metric depth, at original resolution."""
         from PIL import Image
 
-        if self.depth_pro_transform is None:
+        if self.depth_pro_processor is None:
             return np.ones_like(image[..., 0], dtype=np.float32) * 5.0
 
-        if image.dtype != np.uint8:
-            image_uint8 = image.astype(np.uint8)
-        else:
-            image_uint8 = image
-
+        image_uint8 = image if image.dtype == np.uint8 else image.astype(np.uint8)
         if self.input_color == "bgr" and image_uint8.shape[2] == 3:
             image_rgb = image_uint8[..., ::-1]
         else:
             image_rgb = image_uint8
 
-        pil_img = Image.fromarray(image_rgb)
-        x = self.depth_pro_transform(pil_img).to(self.device)
-
-        # Depth Pro infers metric depth; use default focal length if unknown
-        result = self.depth_pro_model.infer(x)  # returns dict with "depth" key
-        if isinstance(result, dict):
-            depth = result["depth"]
-        else:
-            depth = result
-
-        if hasattr(depth, "cpu"):
-            depth = depth.cpu().numpy()
-        depth = np.squeeze(depth)
-
-        # Resize to original resolution
-        import cv2
-        depth = cv2.resize(
-            depth,
-            (image.shape[1], image.shape[0]),
-            interpolation=cv2.INTER_LINEAR,
+        pil_img = Image.fromarray(np.ascontiguousarray(image_rgb))
+        inputs = self.depth_pro_processor(images=pil_img, return_tensors="pt").to(self.device)
+        with torch.no_grad():
+            outputs = self.depth_pro_model(**inputs)
+        post = self.depth_pro_processor.post_process_depth_estimation(
+            outputs, target_sizes=[(image.shape[0], image.shape[1])]
         )
-        return depth.astype(np.float32)
+        depth = post[0]["predicted_depth"]
+        return depth.detach().cpu().numpy().astype(np.float32)
 
     @torch.no_grad()
     def extract_video(
