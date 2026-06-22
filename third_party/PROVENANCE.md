@@ -5,7 +5,6 @@
 
 | 目录 | 上游 | 裁剪自 commit |
 |------|------|----------------|
-| dinov3 | https://github.com/facebookresearch/dinov3.git | 31703e4cbf1ccb7c4a72daa1350405f86754b6d1 |
 | VGGT | https://github.com/facebookresearch/vggt.git | 44b3afbd1869d8bde4894dd8ea1e293112dd5eba |
 | Video-Depth-Anything | https://github.com/DepthAnything/Video-Depth-Anything.git | 4f5ae23172ba60fd7bc11ef671cca678842c7072 |
 | ml-depth-pro | https://github.com/apple/ml-depth-pro.git | 9efe5c1def37a26c5367a71df664b18e1306c708 |
