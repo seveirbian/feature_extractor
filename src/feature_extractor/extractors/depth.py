@@ -119,7 +119,9 @@ def _load_depth_pro(device: torch.device, assets_root=None):
             "请放入 HF 格式权重(config.json + safetensors),来源 HF 仓库 apple/DepthPro-hf。"
         )
     processor = AutoImageProcessor.from_pretrained(str(hf_dir))
-    model = DepthProForDepthEstimation.from_pretrained(str(hf_dir), use_fov_model=False)
+    # FOV head estimates focal length, which sets the *metric depth scale*; the original
+    # (Apple default) DepthPro used it, so keep it on to preserve metric scale.
+    model = DepthProForDepthEstimation.from_pretrained(str(hf_dir), use_fov_model=True)
     model = model.to(device)
     model.eval()
     print(f"[DepthExtractor] Loaded Depth Pro (HF): {hf_dir}")
