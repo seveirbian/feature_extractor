@@ -65,6 +65,20 @@ class DINOExtractor:
             "local_repo": "third_party/dinov3",
             "weights": "third_party/dinov3/checkpoints/dinov3_vits16_pretrain_lvd1689m-08c60483.pth",
         },
+        "dinov3_vits16_hf": {
+            "family": "dinov3_hf",
+            "img_size": 512,
+            "patch_size": 16,
+            "embed_dim": 384,
+            "weights": "third_party/dinov3/checkpoints/dinov3-vits16-hf",
+        },
+        "dinov3_vits16plus_hf": {
+            "family": "dinov3_hf",
+            "img_size": 512,
+            "patch_size": 16,
+            "embed_dim": 384,
+            "weights": "third_party/dinov3/checkpoints/dinov3-vits16plus-hf",
+        },
         "dinov2_vitl14": {
             "family": "dinov2",
             "img_size": 518,
