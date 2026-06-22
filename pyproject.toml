@@ -18,6 +18,8 @@ dependencies = [
     # software AV1 decoder; PyAV's wheel bundles libdav1d. See video_io.py.
     "av>=12.0.0",
     "timm>=1.0.0",
+    # DINOv3 HuggingFace 可选后端(family=dinov3_hf);DINOv3 自 transformers 4.56 起原生支持
+    "transformers>=4.56",
     # required by vendored VGGT pose model (third_party/VGGT)
     "einops>=0.7.0",
     "safetensors>=0.4.0",
