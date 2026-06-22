@@ -1,7 +1,7 @@
-"""DINO feature extractor using frozen DINOv3 or DINOv2 backbones.
+"""DINO feature extractor using a frozen DINOv3 HuggingFace backbone.
 
-Defaults to the local DINOv3 ViT-S/16+ checkpoint under ``third_party/dinov3``.
-DINOv2 remains supported for older feature stores and experiments.
+Defaults to the local HF-format DINOv3 ViT-S/16+ checkpoint under
+``third_party/dinov3/checkpoints/dinov3-vits16plus-hf``.
 
 Extracts patch-level features for future H frames from egocentric video.
 Features are L2-normalized and stored as FP32 in HDF5.
@@ -10,7 +10,6 @@ Features are L2-normalized and stored as FP32 in HDF5.
 from __future__ import annotations
 
 import os
-import warnings
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -22,15 +21,6 @@ from tqdm import tqdm
 
 from feature_extractor.assets import resolve_assets_root
 
-_WARNED_FALLBACKS: set[str] = set()
-
-
-def _warn_once(key: str, message: str) -> None:
-    if key in _WARNED_FALLBACKS:
-        return
-    _WARNED_FALLBACKS.add(key)
-    warnings.warn(message, RuntimeWarning, stacklevel=2)
-
 
 class DINOExtractor:
     """Frozen DINO patch-token feature extractor.
@@ -41,64 +31,25 @@ class DINOExtractor:
     Args:
         model_name: Model variant. Options:
             - "dinov3_vits16plus" (ViT-S/16+, 384-dim, default)
-            - "dinov2_vitl14"  (ViT-L/14, 1024-dim, default)
-            - "dinov2_vitb14"  (ViT-B/14, 768-dim)
-            - "dinov2_vits14"  (ViT-S/14, 384-dim)
+            - "dinov3_vits16"    (ViT-S/16, 384-dim)
         device: torch device (cuda/cpu). If None, auto-detects.
         compile: Whether to torch.compile() the model (CUDA only).
     """
 
     MODEL_CONFIGS = {
         "dinov3_vits16plus": {
-            "family": "dinov3",
-            "img_size": 512,
-            "patch_size": 16,
-            "embed_dim": 384,
-            "local_repo": "third_party/dinov3",
-            "weights": "third_party/dinov3/checkpoints/dinov3_vits16plus_pretrain_lvd1689m-4057cbaa.pth",
-        },
-        "dinov3_vits16": {
-            "family": "dinov3",
-            "img_size": 512,
-            "patch_size": 16,
-            "embed_dim": 384,
-            "local_repo": "third_party/dinov3",
-            "weights": "third_party/dinov3/checkpoints/dinov3_vits16_pretrain_lvd1689m-08c60483.pth",
-        },
-        "dinov3_vits16_hf": {
-            "family": "dinov3_hf",
-            "img_size": 512,
-            "patch_size": 16,
-            "embed_dim": 384,
-            "weights": "third_party/dinov3/checkpoints/dinov3-vits16-hf",
-        },
-        "dinov3_vits16plus_hf": {
             "family": "dinov3_hf",
             "img_size": 512,
             "patch_size": 16,
             "embed_dim": 384,
             "weights": "third_party/dinov3/checkpoints/dinov3-vits16plus-hf",
         },
-        "dinov2_vitl14": {
-            "family": "dinov2",
-            "img_size": 518,
-            "patch_size": 14,
-            "embed_dim": 1024,
-            "hub_repo": "facebookresearch/dinov2:main",
-        },
-        "dinov2_vitb14": {
-            "family": "dinov2",
-            "img_size": 518,
-            "patch_size": 14,
-            "embed_dim": 768,
-            "hub_repo": "facebookresearch/dinov2:main",
-        },
-        "dinov2_vits14": {
-            "family": "dinov2",
-            "img_size": 518,
-            "patch_size": 14,
+        "dinov3_vits16": {
+            "family": "dinov3_hf",
+            "img_size": 512,
+            "patch_size": 16,
             "embed_dim": 384,
-            "hub_repo": "facebookresearch/dinov2:main",
+            "weights": "third_party/dinov3/checkpoints/dinov3-vits16-hf",
         },
     }
 
@@ -106,17 +57,9 @@ class DINOExtractor:
         "facebook/dinov3-vits16plus-pretrain-lvd1689m": "dinov3_vits16plus",
         "facebook/dinov3-vits16plus": "dinov3_vits16plus",
         "dinov3-vits16plus": "dinov3_vits16plus",
-        "dinov3_vits16plus_pretrain_lvd1689m": "dinov3_vits16plus",
         "facebook/dinov3-vits16-pretrain-lvd1689m": "dinov3_vits16",
         "facebook/dinov3-vits16": "dinov3_vits16",
         "dinov3-vits16": "dinov3_vits16",
-        "dinov3_vits16_pretrain_lvd1689m": "dinov3_vits16",
-        "facebook/dinov2-vitl14": "dinov2_vitl14",
-        "facebook/dinov2-vitb14": "dinov2_vitb14",
-        "facebook/dinov2-vits14": "dinov2_vits14",
-        "dinov2-vitl14": "dinov2_vitl14",
-        "dinov2-vitb14": "dinov2_vitb14",
-        "dinov2-vits14": "dinov2_vits14",
     }
 
     def __init__(
@@ -130,7 +73,11 @@ class DINOExtractor:
         self.model_name = self.MODEL_ALIASES.get(model_name, model_name)
         self.input_color = input_color
         self.assets_root = assets_root
-        cfg = self.MODEL_CONFIGS.get(self.model_name, self.MODEL_CONFIGS["dinov3_vits16plus"])
+        if self.model_name not in self.MODEL_CONFIGS:
+            raise ValueError(
+                f"Unknown dino_model {model_name!r}; available: {sorted(self.MODEL_CONFIGS)}"
+            )
+        cfg = self.MODEL_CONFIGS[self.model_name]
         self.family = cfg["family"]
         self.img_size = cfg["img_size"]
         self.patch_size = cfg["patch_size"]
@@ -144,20 +91,9 @@ class DINOExtractor:
 
     def _load_model(self, compile: bool) -> nn.Module:
         """Load and freeze the configured DINO model."""
-        cfg = self.MODEL_CONFIGS.get(self.model_name, self.MODEL_CONFIGS["dinov3_vits16plus"])
+        cfg = self.MODEL_CONFIGS[self.model_name]
 
-        if cfg["family"] == "dinov3":
-            model = self._load_dinov3(cfg)
-        elif cfg["family"] == "dinov3_hf":
-            model = self._load_dinov3_hf(cfg)
-        else:
-            try:
-                hub_repo = cfg["hub_repo"]
-                model = torch.hub.load(hub_repo, self.model_name)
-                print(f"[DINOExtractor] Loaded via torch.hub: {hub_repo}/{self.model_name}")
-            except Exception as e:
-                print(f"[DINOExtractor] torch.hub failed: {e}, trying alternative...")
-                model = self._load_alternative()
+        model = self._load_dinov3_hf(cfg)
 
         model = model.to(self.device)
         model.eval()
@@ -172,31 +108,6 @@ class DINOExtractor:
             except Exception as exc:
                 print(f"[DINOExtractor] torch.compile failed: {exc}")
 
-        return model
-
-    def _load_dinov3(self, cfg: dict) -> nn.Module:
-        """Load DINOv3 from the local third_party checkout and checkpoint."""
-        import sys
-
-        root = resolve_assets_root(self.assets_root)
-        repo = root / cfg["local_repo"]
-        weights = root / cfg["weights"]
-        if not repo.exists():
-            raise FileNotFoundError(f"DINOv3 repo not found: {repo}")
-        if not weights.exists():
-            raise FileNotFoundError(f"DINOv3 checkpoint not found: {weights}")
-        if str(repo) not in sys.path:
-            sys.path.insert(0, str(repo))
-
-        from dinov3.hub import backbones
-
-        build_model = getattr(backbones, self.model_name)
-        model = build_model(pretrained=False, check_hash=False)
-        state_dict = torch.load(str(weights), map_location="cpu")
-        if isinstance(state_dict, dict) and "teacher" in state_dict:
-            state_dict = state_dict["teacher"]
-        model.load_state_dict(state_dict, strict=True)
-        print(f"[DINOExtractor] Loaded DINOv3: {self.model_name} ({weights})")
         return model
 
     def _load_dinov3_hf(self, cfg: dict) -> nn.Module:
@@ -217,34 +128,6 @@ class DINOExtractor:
         print(f"[DINOExtractor] Loaded DINOv3 (HF): {self.model_name} ({weights})")
         return model
 
-    def _load_alternative(self) -> nn.Module:
-        """Try timm as fallback."""
-        try:
-            import timm
-
-            model = timm.create_model(
-                f"vit_{self.model_name.replace('dinov2_', '')}",
-                pretrained=True,
-                num_classes=0,
-            )
-            _warn_once(
-                f"dino_timm_fallback:{self.model_name}",
-                f"DINO fallback: loaded {self.model_name} through timm after the primary loader failed.",
-            )
-            print(f"[DINOExtractor] Loaded via timm")
-            return model
-        except Exception as e:
-            _warn_once(
-                f"dino_timm_fallback_failed:{self.model_name}",
-                f"DINO fallback failed: timm could not load {self.model_name}: {e}",
-            )
-            print(f"[DINOExtractor] timm fallback failed: {e}")
-            raise RuntimeError(
-                f"Cannot load DINO model '{self.model_name}'. "
-                "torch.hub and timm both failed. "
-                "Ensure the requested backbone is available locally."
-            )
-
     @staticmethod
     def _slice_hf_tokens(last_hidden_state: torch.Tensor, num_register: int) -> torch.Tensor:
         """HF DINOv3 输出 [CLS, R×register, patches] → 还原 [CLS, patches](剔除 register)。"""
@@ -253,55 +136,11 @@ class DINOExtractor:
         return torch.cat([cls, patches], dim=1)
 
     def _extract_tokens(self, image_tensor: torch.Tensor) -> torch.Tensor:
-        """Return DINO tokens as (1, N, D), preferring patch-level features."""
+        """Return DINO tokens as (1, N, D) = [CLS] + patches(剔除 register)。"""
         batch = image_tensor.unsqueeze(0)
-
-        if self.family == "dinov3_hf":
-            out = self.model(pixel_values=batch)
-            num_register = int(getattr(self.model.config, "num_register_tokens", 0))
-            return self._slice_hf_tokens(out.last_hidden_state, num_register)
-
-        if hasattr(self.model, "forward_features"):
-            output = self.model.forward_features(batch)
-        else:
-            output = self.model(batch)
-
-        if isinstance(output, dict):
-            cls_token = None
-            patch_tokens = None
-            for key in ("x_norm_clstoken", "cls_token", "pooler_output"):
-                if key in output and output[key] is not None:
-                    cls_token = output[key]
-                    break
-            for key in ("x_norm_patchtokens", "patch_tokens", "last_hidden_state"):
-                if key in output and output[key] is not None:
-                    patch_tokens = output[key]
-                    break
-
-            if patch_tokens is not None and patch_tokens.ndim == 3:
-                if cls_token is not None and cls_token.ndim == 2:
-                    return torch.cat([cls_token.unsqueeze(1), patch_tokens], dim=1)
-                return patch_tokens
-            if cls_token is not None and cls_token.ndim == 2:
-                return cls_token.unsqueeze(1)
-
-            for value in output.values():
-                if isinstance(value, torch.Tensor):
-                    output = value
-                    break
-
-        if hasattr(output, "last_hidden_state"):
-            output = output.last_hidden_state
-        elif isinstance(output, tuple):
-            output = output[0]
-
-        if not isinstance(output, torch.Tensor):
-            raise RuntimeError(f"Unsupported DINO output type: {type(output)!r}")
-        if output.ndim == 2:
-            output = output.unsqueeze(1)
-        if output.ndim != 3:
-            raise RuntimeError(f"Unsupported DINO token shape: {tuple(output.shape)}")
-        return output
+        out = self.model(pixel_values=batch)
+        num_register = int(getattr(self.model.config, "num_register_tokens", 0))
+        return self._slice_hf_tokens(out.last_hidden_state, num_register)
 
     @torch.no_grad()
     def extract_frame(self, image: np.ndarray, *, resize: bool = True) -> np.ndarray:
