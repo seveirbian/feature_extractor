@@ -236,11 +236,16 @@ feats = dino.extract_video("clip.mp4", frame_indices=[0, 8, 16])  # (3, 1025, 38
 HF 仓库是 gated,需先在 huggingface.co 同意许可、再登录下载:
 
 ```bash
-uv run hf auth login        # 或 huggingface-cli login,输入有访问权的 token
+# 在仓库根目录执行;hf 是 huggingface_hub 自带 CLI(已随依赖安装)
+uv run hf auth login        # 输入有该 gated 仓库访问权的 token
 uv run hf download facebook/dinov3-vits16-pretrain-lvd1689m \
     --local-dir third_party/dinov3/checkpoints/dinov3-vits16-hf
 # vits16plus 同理 → dinov3-vits16plus-hf/
 ```
+
+> 代码按约定查找 `<assets_root>/third_party/dinov3/checkpoints/dinov3-vits16-hf`
+> (`assets_root` 默认=仓库根)。把权重放到别处时,用 `--assets_root /ROOT`
+> 或 `FEATURE_EXTRACTOR_ASSETS=/ROOT`(仅改根,子路径不变),或把该约定路径软链过去。
 
 **2) 用它跑特征提取**:
 
