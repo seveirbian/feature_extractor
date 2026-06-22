@@ -46,21 +46,16 @@ def _env_meta(command: str) -> dict:
 
 
 def _build_extractors(branches, depth_mode, device: torch.device, assets_root):
-    """按需构建各分支提取器。
-
-    注意:当请求 depth 但未请求 dino 时,仍会构建一个 DINO 作为 depth 的骨干
-    (传给 ``dino_extractor``),但返回值里的 dino 置为 None——避免把仅作骨干用的
-    实例当成独立 dino 分支去跑。
-    """
+    """按需构建各分支提取器。"""
     dino = depth = pose = None
-    if "dino" in branches or "depth" in branches:
+    if "dino" in branches:
         dino = DINOExtractor(model_name="dinov3_vits16plus", device=device, assets_root=assets_root)
     if "depth" in branches:
-        depth = DepthExtractor(mode=depth_mode, device=device, dino_extractor=dino,
+        depth = DepthExtractor(mode=depth_mode, device=device,
                                vda_input_size=224, assets_root=assets_root)
     if "pose" in branches:
         pose = PoseExtractor(device=device, assets_root=assets_root)
-    return dino if "dino" in branches else None, depth, pose
+    return dino, depth, pose
 
 
 def run_sanity(branches, depth_mode, device, assets_root) -> list[sanity.CheckResult]:

@@ -209,7 +209,7 @@ class DepthExtractor:
         if self.mode == "da3":
             model = _load_depth_anything_v3(self.device)
             if model is None:
-                raise RuntimeError("Depth Anything V3 (da3) 不可用;请改用 --depth_mode video_depth_anything。")
+                raise RuntimeError("Depth Anything V3 (da3) unavailable; use --depth_mode video_depth_anything.")
             model = model.to(self.device)
             model.eval()
             return model
@@ -338,7 +338,7 @@ class DepthExtractor:
             depth_map = self._extract_depth_pro(image)
         else:
             raise RuntimeError(
-                f"depth mode={self.mode!r} 没有可用模型;支持 video_depth_anything / da3 / depth_pro。"
+                f"depth mode={self.mode!r} has no loaded model; supported: video_depth_anything / da3 / depth_pro."
             )
 
         inv_depth = self._to_inverse_depth(depth_map)
