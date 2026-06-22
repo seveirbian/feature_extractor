@@ -203,7 +203,9 @@ huggingface.co 同意许可、再登录下载(在仓库根目录执行;`hf` 是 
 uv run hf auth login        # 输入有该 gated 仓库访问权的 token
 uv run hf download facebook/dinov3-vits16-pretrain-lvd1689m \
     --local-dir third_party/dinov3/checkpoints/dinov3-vits16-hf
-# vits16plus 同理 → dinov3-vits16plus-hf/
+# 默认 vits16plus:
+uv run hf download facebook/dinov3-vits16plus-pretrain-lvd1689m \
+    --local-dir third_party/dinov3/checkpoints/dinov3-vits16plus-hf
 ```
 
 > 代码按约定查找 `<assets_root>/third_party/dinov3/checkpoints/dinov3-vits16-hf`

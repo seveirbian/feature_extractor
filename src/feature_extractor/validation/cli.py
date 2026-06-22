@@ -168,7 +168,8 @@ def main():
     parser.add_argument("--report", type=str, default="validation_report.md")
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--branches", type=str, default="dino,depth,pose")
-    parser.add_argument("--depth_mode", type=str, default="video_depth_anything")
+    parser.add_argument("--depth_mode", type=str, default="video_depth_anything",
+                        choices=["video_depth_anything", "vda", "da3", "depth_pro"])
     parser.add_argument("--frames-sweep", type=str, default="16,32,64,128")
     parser.add_argument("--perf-frames", type=int, default=64)
     parser.add_argument("--assets_root", type=str, default=None)
