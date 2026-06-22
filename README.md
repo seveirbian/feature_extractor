@@ -41,9 +41,9 @@ uv sync
 
 ## 3. 模型资源(third_party/)
 
-- **DINO**:走 HuggingFace `transformers`(PyPI 依赖,已随 `uv sync` 安装),**不在** `third_party/`;
-  权重为 HF 格式,获取方式见第 6 节「DINO backbone」。
-- **VGGT / Video-Depth-Anything / ml-depth-pro**:精简后的 **vendored 源码内置**在
+- **DINO** 与 **Depth Pro**:走 HuggingFace `transformers`(PyPI 依赖,已随 `uv sync` 安装),
+  **不在** `third_party/`;权重为 HF 格式(DINO 见第 6 节,Depth Pro 见第 7 节)。
+- **VGGT / Video-Depth-Anything**:精简后的 **vendored 源码内置**在
   `third_party/<repo>/`(非子模块;裁剪溯源见 `third_party/PROVENANCE.md`)。
 
 ### 权重文件(不在 git 里)
@@ -53,14 +53,13 @@ vendored 后端权重位于 `third_party/<repo>/checkpoints/`,托管在华为云
 
 ```bash
 obsutil cp obs://cloudrobo-model/wangchao/egoWM/third_party/Video-Depth-Anything/checkpoints ./third_party/Video-Depth-Anything/checkpoints -r -f
-obsutil cp obs://cloudrobo-model/wangchao/egoWM/third_party/ml-depth-pro/checkpoints          ./third_party/ml-depth-pro/checkpoints          -r -f
 obsutil cp obs://cloudrobo-model/wangchao/egoWM/third_party/VGGT/checkpoints                  ./third_party/VGGT/checkpoints                  -r -f
 ```
 
-**DINO(HF)权重单独获取**(`hf download ...`),见第 6 节。
+**DINO 与 Depth Pro(均 HF)权重单独获取**(`hf download ...`),见第 6 / 7 节。
 
-只用部分后端时只下对应的几行(`dino` 需 DINOv3 HF 权重,见第 6 节;默认 depth `video_depth_anything`
-需 `Video-Depth-Anything` + `ml-depth-pro`;`pose` 需 `VGGT`)。
+只用部分后端时只下对应的几项(`dino` 需 DINOv3 HF 权重,见第 6 节;默认 depth `video_depth_anything`
+需 `Video-Depth-Anything`(OBS)+ Depth Pro(HF,见第 7 节);`pose` 需 `VGGT`(OBS))。
 
 ### 指向其他位置
 
@@ -235,9 +234,17 @@ feats = dino.extract_video("clip.mp4", frame_indices=[0, 8, 16])  # (3, 1025, 38
 
 | 模式 | 后端 | 额外依赖 |
 |------|------|---------|
-| `video_depth_anything`(默认) | Video Depth Anything(`vitl`)+ Depth Pro 度量校正 | 已含在 `uv sync` |
+| `video_depth_anything`(默认) | Video Depth Anything(`vitl`,vendored)+ Depth Pro 度量校正 | VDA 权重(OBS)+ Depth Pro(HF) |
 | `da3` | Depth Anything V3 | `pip install depth_anything_3` |
-| `depth_pro` | Apple Depth Pro | 已含在 `uv sync` |
+| `depth_pro` | Apple Depth Pro(HuggingFace) | Depth Pro HF 权重 |
+
+`video_depth_anything`(默认)在关键帧用 **Depth Pro** 做米制校正,`depth_pro` 模式直接用 Depth Pro。
+Depth Pro 现走 HuggingFace `transformers`,需本地 HF 格式权重目录:
+
+```bash
+uv run hf download apple/DepthPro-hf \
+    --local-dir third_party/ml-depth-pro/checkpoints/depth-pro-hf
+```
 
 ## 8. 自验证(feature-validate)
 
