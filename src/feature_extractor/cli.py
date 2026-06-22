@@ -171,8 +171,8 @@ def main():
     parser.add_argument("--frames_per_video", type=int, default=120,
                         help="Number of original video frames to sample per video; <=0 means all")
     parser.add_argument("--dino_model", type=str, default="dinov3_vits16plus")
-    parser.add_argument("--depth_mode", type=str, default="dino_attention",
-                        choices=["video_depth_anything", "vda", "da3", "depth_pro", "dino_attention"])
+    parser.add_argument("--depth_mode", type=str, default="video_depth_anything",
+                        choices=["video_depth_anything", "vda", "da3", "depth_pro"])
     parser.add_argument("--vda_input_size", type=int, default=224,
                         help="Video Depth Anything input size. Lower this to avoid GPU OOM.")
     parser.add_argument("--annotation_dir", type=str, default=None,
@@ -230,7 +230,6 @@ def main():
         extractor_depth = DepthExtractor(
             mode=args.depth_mode,
             device=device,
-            dino_extractor=extractor_dino,
             vda_input_size=args.vda_input_size,
             assets_root=args.assets_root,
         )

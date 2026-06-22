@@ -147,117 +147,6 @@ def _load_depth_pro(device: torch.device, assets_root=None):
         return None, None
 
 
-# ----------------------------------------------------------------------
-# Fallback: MiDaS-style depth from DINO attention (no GPU needed)
-# ----------------------------------------------------------------------
-def _depth_from_dino_attention(
-    image: np.ndarray,
-    dino_extractor,
-    h: int,
-    w: int,
-) -> np.ndarray:
-    """Extract depth proxy from DINO ViT memory-efficient attention maps via hooks.
-
-    Hooks into the last transformer block's MemEffAttention module to capture
-    raw attention weights. Uses CLS token attention as depth proxy:
-    closer/central objects receive higher attention weight.
-    """
-    if image.dtype == np.uint8:
-        image_f = image.astype(np.float32) / 255.0
-    else:
-        image_f = image
-
-    if getattr(dino_extractor, "input_color", "rgb") == "bgr" and image_f.shape[2] == 3:
-        image_f = image_f[..., ::-1]
-
-    image_t = (
-        torch.from_numpy(image_f)
-        .permute(2, 0, 1)
-        .float()
-        .to(dino_extractor.device)
-    )
-    image_t = F.interpolate(
-        image_t.unsqueeze(0),
-        size=(518, 518),
-        mode="bicubic",
-        align_corners=False,
-    )
-    mean = torch.as_tensor([0.485, 0.456, 0.406], device=dino_extractor.device).view(1, 3, 1, 1)
-    std = torch.as_tensor([0.229, 0.224, 0.225], device=dino_extractor.device).view(1, 3, 1, 1)
-    image_t = (image_t - mean) / std
-
-    model = dino_extractor.model
-
-    # Find all MemEffAttention modules and hook the last one
-    attn_modules = [(n, m) for n, m in model.named_modules() if "MemEffAttention" in type(m).__name__]
-    if not attn_modules:
-        raise RuntimeError("No MemEffAttention modules found in DINO model")
-
-    hook_target_name, hook_target = attn_modules[-1]  # last block's attention
-    saved_attn: list[torch.Tensor] = []
-
-    def hook_fn(module, input, output):
-        # MemEffAttention returns (attn_weights, token_count) or just attn_weights
-        if isinstance(output, tuple):
-            saved_attn.append(output[0].detach())  # attention weights
-        elif isinstance(output, torch.Tensor) and output.ndim == 4:
-            saved_attn.append(output.detach())
-
-    handle = hook_target.register_forward_hook(hook_fn)
-
-    try:
-        with torch.no_grad():
-            model(image_t)
-    finally:
-        handle.remove()
-
-    if not saved_attn:
-        raise RuntimeError(f"Hook captured nothing on {hook_target_name}")
-
-    attn = saved_attn[0]  # (B, num_heads, N, N) or (B, num_heads, N, K)
-    # Average across heads: (B, N, N) or (B, num_heads, N, K)
-    if attn.ndim == 4 and attn.shape[1] > 1:
-        attn = attn.mean(1)  # (B, N, N) or (B, N, K)
-
-    # attn shape: (1, seq_len+1, seq_len+1) for self-attention
-    # CLS attention: attn[0, 0, 1:] = (N,) per-token attention from CLS token
-    # Fallback: use diagonal attention (each token's self-attention) → spatial layout
-    b, seq_len = attn.shape[:2]
-    if seq_len == 1:
-        raise RuntimeError("Attention sequence length is 1 — model output format unexpected")
-
-    # Try CLS token first (index 0 of key dimension), then fall back to spatial pattern
-    if b == 1 and seq_len > 1:
-        # (N+1, N+1) self-attention: row 0 = CLS attending to all tokens
-        # Row 0 col 1: = CLS→[CLS], col 2: = CLS→patch1, etc.
-        cls_attn = attn[0, 0, 1:]  # CLS→all patches: (N,)
-        n_patches = cls_attn.numel()
-        side = int(n_patches ** 0.5)
-        if side * side == n_patches:
-            depth_map = cls_attn.reshape(side, side).cpu().numpy()
-        else:
-            # Use diagonal (self-attention) for spatial pattern
-            diag_attn = attn[0, torch.arange(1, seq_len), torch.arange(1, seq_len)]
-            n_p = diag_attn.numel()
-            side = int(n_p ** 0.5)
-            depth_map = diag_attn.reshape(side, side).cpu().numpy()
-    else:
-        raise RuntimeError(f"Unexpected attention shape: {attn.shape}")
-
-    depth_map = depth_map - depth_map.min()
-    depth_map = depth_map / (depth_map.max() + 1e-8)
-
-    # Upsample to full resolution using bicubic for smoothness
-    depth_full = F.interpolate(
-        torch.from_numpy(depth_map).unsqueeze(0).unsqueeze(0).float(),
-        size=(h, w),
-        mode="bicubic",
-        align_corners=False,
-    ).squeeze().numpy()
-
-    return depth_full.astype(np.float32)
-
-
 class DepthExtractor:
     """Video Depth Anything + Depth Pro depth extractor.
 
@@ -271,7 +160,6 @@ class DepthExtractor:
             - "video_depth_anything" / "vda": local Video Depth Anything
             - "da3": Depth Anything v3 if available
             - "depth_pro": Depth Pro (metric, keyframes only)
-            - "dino_attention": DINO attention as proxy (fallback, no GPU)
         device: torch device.
         z_min / z_max: Clamping range for metric depth (meters).
         keyframe_interval: Extract Depth Pro every N frames (default 30).
@@ -279,12 +167,11 @@ class DepthExtractor:
 
     def __init__(
         self,
-        mode: Literal["video_depth_anything", "vda", "da3", "depth_pro", "dino_attention"] = "da3",
+        mode: Literal["video_depth_anything", "vda", "da3", "depth_pro"] = "video_depth_anything",
         device: Optional[str] = None,
         z_min: float = 0.1,
         z_max: float = 100.0,
         keyframe_interval: int = 30,
-        dino_extractor=None,
         vda_encoder: Literal["vits", "vitb", "vitl"] = "vitl",
         vda_metric: bool = False,
         vda_input_size: int = 518,
@@ -298,7 +185,6 @@ class DepthExtractor:
         self.z_min = z_min
         self.z_max = z_max
         self.keyframe_interval = keyframe_interval
-        self.dino_extractor = dino_extractor
         self.vda_encoder = vda_encoder
         self.vda_metric = vda_metric
         self.vda_input_size = vda_input_size
@@ -323,16 +209,10 @@ class DepthExtractor:
         if self.mode == "da3":
             model = _load_depth_anything_v3(self.device)
             if model is None:
-                _warn_once(
-                    "depth_da3_to_dino_attention",
-                    "Depth fallback: DA3 is unavailable; switching extraction mode to DINO attention proxy.",
-                )
-                print("[DepthExtractor] Falling back to dino_attention mode.")
-                self.mode = "dino_attention"
-            else:
-                model = model.to(self.device)
-                model.eval()
-                return model
+                raise RuntimeError("Depth Anything V3 (da3) 不可用;请改用 --depth_mode video_depth_anything。")
+            model = model.to(self.device)
+            model.eval()
+            return model
         elif self.mode == "video_depth_anything":
             model = _load_video_depth_anything(
                 self.device,
@@ -457,25 +337,9 @@ class DepthExtractor:
         elif self.mode == "depth_pro" and self.depth_pro_model is not None:
             depth_map = self._extract_depth_pro(image)
         else:
-            # DINO attention proxy. This is the intended behavior for
-            # mode='dino_attention' (the default), not a model-load failure;
-            # it produces a depth *proxy* from DINO attention, not geometric
-            # depth. Pass --depth_mode video_depth_anything/da3/depth_pro for
-            # a real depth model.
-            if self.mode == "dino_attention":
-                _warn_once(
-                    "depth_frame_dino_attention_proxy",
-                    "Depth: mode='dino_attention' produces a DINO-attention proxy, "
-                    "not geometric depth. Use --depth_mode video_depth_anything/da3/depth_pro "
-                    "for a real depth model.",
-                )
-            else:
-                _warn_once(
-                    f"depth_frame_dino_attention:{self.mode}",
-                    f"Depth fallback: mode={self.mode!r} has no loaded model; "
-                    "falling back to the DINO attention proxy.",
-                )
-            depth_map = self._extract_dino_attention(image, h, w)
+            raise RuntimeError(
+                f"depth mode={self.mode!r} 没有可用模型;支持 video_depth_anything / da3 / depth_pro。"
+            )
 
         inv_depth = self._to_inverse_depth(depth_map)
         return inv_depth[..., None].astype(np.float32)
@@ -641,17 +505,6 @@ class DepthExtractor:
             interpolation=cv2.INTER_LINEAR,
         )
         return depth.astype(np.float32)
-
-    def _extract_dino_attention(self, image: np.ndarray, h: int, w: int) -> np.ndarray:
-        """DINO attention as depth proxy (fallback when no GPU)."""
-        if self.dino_extractor is None:
-            # Return uniform depth
-            return np.ones((h, w), dtype=np.float32) * 5.0
-
-        try:
-            return _depth_from_dino_attention(image, self.dino_extractor, h, w)
-        except Exception:
-            return np.ones((h, w), dtype=np.float32) * 5.0
 
     @torch.no_grad()
     def extract_video(
