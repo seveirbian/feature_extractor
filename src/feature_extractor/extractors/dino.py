@@ -148,6 +148,8 @@ class DINOExtractor:
 
         if cfg["family"] == "dinov3":
             model = self._load_dinov3(cfg)
+        elif cfg["family"] == "dinov3_hf":
+            model = self._load_dinov3_hf(cfg)
         else:
             try:
                 hub_repo = cfg["hub_repo"]
@@ -197,6 +199,24 @@ class DINOExtractor:
         print(f"[DINOExtractor] Loaded DINOv3: {self.model_name} ({weights})")
         return model
 
+    def _load_dinov3_hf(self, cfg: dict) -> nn.Module:
+        """从本地 HF 格式目录加载 DINOv3(离线 from_pretrained)。"""
+        try:
+            from transformers import AutoModel
+        except ImportError as e:
+            raise RuntimeError(
+                "DINOv3 HF backend 需要 transformers(>=4.56)。请 `uv sync` 或 `pip install transformers`。"
+            ) from e
+        weights = resolve_assets_root(self.assets_root) / cfg["weights"]
+        if not weights.exists():
+            raise FileNotFoundError(
+                f"DINOv3 HF weights dir not found: {weights}. "
+                "请放入 HF 格式权重(config.json + safetensors)。"
+            )
+        model = AutoModel.from_pretrained(str(weights))
+        print(f"[DINOExtractor] Loaded DINOv3 (HF): {self.model_name} ({weights})")
+        return model
+
     def _load_alternative(self) -> nn.Module:
         """Try timm as fallback."""
         try:
@@ -225,9 +245,21 @@ class DINOExtractor:
                 "Ensure the requested backbone is available locally."
             )
 
+    @staticmethod
+    def _slice_hf_tokens(last_hidden_state: torch.Tensor, num_register: int) -> torch.Tensor:
+        """HF DINOv3 输出 [CLS, R×register, patches] → 还原 [CLS, patches](剔除 register)。"""
+        cls = last_hidden_state[:, 0:1, :]
+        patches = last_hidden_state[:, 1 + num_register:, :]
+        return torch.cat([cls, patches], dim=1)
+
     def _extract_tokens(self, image_tensor: torch.Tensor) -> torch.Tensor:
         """Return DINO tokens as (1, N, D), preferring patch-level features."""
         batch = image_tensor.unsqueeze(0)
+
+        if self.family == "dinov3_hf":
+            out = self.model(pixel_values=batch)
+            num_register = int(getattr(self.model.config, "num_register_tokens", 0))
+            return self._slice_hf_tokens(out.last_hidden_state, num_register)
 
         if hasattr(self.model, "forward_features"):
             output = self.model.forward_features(batch)
