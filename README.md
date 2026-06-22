@@ -192,8 +192,10 @@ CUDA_VISIBLE_DEVICES=7 uv run feature-extract \
 |----------------|------|-----------------------------------------------|
 | `dinov3_vits16plus`(默认) | DINOv3 ViT-S+/16,embed_dim 384 | `dinov3_vits16plus_pretrain_lvd1689m-4057cbaa.pth` |
 | `dinov3_vits16` | DINOv3 ViT-S/16(更轻),embed_dim 384 | `dinov3_vits16_pretrain_lvd1689m-08c60483.pth` |
+| `dinov3_vits16_hf` | DINOv3 ViT-S/16(HuggingFace 后端) | 本地 HF 格式目录 `dinov3-vits16-hf/` |
+| `dinov3_vits16plus_hf` | DINOv3 ViT-S+/16(HuggingFace 后端) | 本地 HF 格式目录 `dinov3-vits16plus-hf/` |
 
-两者输出形状一致(`(T, 1025, 384)`)。`--dino_model` 接受规范名,也接受 HF 风格别名
+各变体输出形状一致(`(T, 1025, 384)`)。`--dino_model` 接受规范名,也接受 HF 风格别名
 (如 `facebook/dinov3-vits16-pretrain-lvd1689m`、`dinov3-vits16`)。
 
 **命令行**:
@@ -224,6 +226,22 @@ feats = dino.extract_video("clip.mp4", frame_indices=[0, 8, 16])  # (3, 1025, 38
 (`https://dl.fbaipublicfiles.com/dinov3/dinov3_vits16/dinov3_vits16_pretrain_lvd1689m-08c60483.pth`),
 其 state_dict key 与 vendored 仓库 builder 严格匹配(`strict=True` 直接可加载);HF 那份打包
 格式可能不同,需额外映射。下好后放到上表对应的文件名路径即可,无需改代码。
+
+### HuggingFace 后端(可选)
+
+`*_hf` 变体用 `transformers` 的原生 DINOv3 实现,输出与 vendored 同契约
+(`(T, 1025, 384)`,已剔除 register tokens)。需要:
+
+- `transformers`(已在依赖中);
+- **本地 HF 格式权重目录**(`config.json` + `*.safetensors`)放在上表对应路径
+  (`third_party/dinov3/checkpoints/dinov3-vits16-hf/` 等)——可从 HF 仓库
+  `facebook/dinov3-vits16-pretrain-lvd1689m`(gated)下载后置于该目录,离线加载。
+
+```bash
+uv run feature-extract --branches dino --dino_model dinov3_vits16_hf ...
+```
+
+vendored 后端(`dinov3_vits16` / `dinov3_vits16plus`)与 `facebook/*` 别名行为不变。
 
 ## 7. 深度模式(`--depth_mode`)
 
