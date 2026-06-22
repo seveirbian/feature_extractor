@@ -393,8 +393,6 @@ class DepthExtractor:
         current (last) frame.
         """
         import cv2
-        import torch
-        import torch.nn.functional as F
         from torchvision.transforms import Compose
 
         INFER_LEN = 32
