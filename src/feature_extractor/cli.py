@@ -100,6 +100,16 @@ def sample_frame_indices(video_path: str, frames_per_video: int | None) -> list[
     return list(range(0, total_frames, step))[:frames_per_video]
 
 
+def should_stream(n_frames: int, threshold: int) -> bool:
+    """Route to the streaming path when the selected frame count is large."""
+    return n_frames > threshold
+
+
+def branches_to_resume_skip(store, video_id: str, branches: list[str]) -> bool:
+    """Resume skips a video only when every requested branch is complete."""
+    return store.is_video_complete(video_id, branches)
+
+
 # ----------------------------------------------------------------------
 # Main extraction
 # ----------------------------------------------------------------------
@@ -113,36 +123,42 @@ def extract_single_video(
     extractor_pose: PoseExtractor | None,
     store: FeatureStore,
     frame_indices: list[int],
+    branches: list[str],
     future_horizon: int = 4,
     resume: bool = False,
+    stream: bool = False,
+    block_size: int = 1024,
 ) -> bool:
     """Extract all features for one video. Returns True if successful."""
-    if resume and store.exists(video_id):
+    if resume and branches_to_resume_skip(store, video_id, branches):
         print(f"  [SKIP] {video_id} already extracted")
         return True
 
     try:
         # Extract DINO
-        dino_feats = None
         if extractor_dino is not None:
-            dino_feats = extractor_dino.extract_video(video_path, frame_indices=frame_indices)
-            store.write_dino(video_id, dino_feats, frame_indices=frame_indices)
+            if stream:
+                extractor_dino.extract_video_streaming(
+                    video_path, frame_indices, store, video_id, block_size=block_size
+                )
+            else:
+                dino_feats = extractor_dino.extract_video(video_path, frame_indices=frame_indices)
+                store.write_dino(video_id, dino_feats, frame_indices=frame_indices)
+                store.mark_branch_complete(video_id, "dino")
 
-        # Extract Depth
-        depth_inv = None
+        # Extract Depth (in-memory path; streaming added in Phase 2)
         if extractor_depth is not None:
             depth_inv = extractor_depth.extract_video(video_path, frame_indices=frame_indices)
             store.write_depth(video_id, depth_inv, frame_indices=frame_indices)
+            store.mark_branch_complete(video_id, "depth")
 
-        # Extract Pose
-        pose_se3 = None
+        # Extract Pose (in-memory path; streaming added in Phase 3)
         if extractor_pose is not None:
             pose_se3 = extractor_pose.extract_video(video_path, frame_indices=frame_indices)
             store.write_pose(video_id, pose_se3, frame_indices=frame_indices)
+            store.mark_branch_complete(video_id, "pose")
 
-        print(f"  [OK] {video_id}: DINO={dino_feats.shape if dino_feats is not None else 'N/A'}, "
-              f"Depth={depth_inv.shape if depth_inv is not None else 'N/A'}, "
-              f"Pose={pose_se3.shape if pose_se3 is not None else 'N/A'}")
+        print(f"  [OK] {video_id}")
         return True
 
     except Exception as e:
@@ -170,6 +186,16 @@ def main():
                         help="Number of future frames for prediction")
     parser.add_argument("--frames_per_video", type=int, default=120,
                         help="Number of original video frames to sample per video; <=0 means all")
+    parser.add_argument("--block_size", type=int, default=1024,
+                        help="DINO/Depth streaming block length (frames)")
+    parser.add_argument("--pose_window", type=int, default=600,
+                        help="VGGT pose window length (frames); GPU-bound")
+    parser.add_argument("--depth_overlap", type=int, default=96,
+                        help="Overlap frames between depth segments")
+    parser.add_argument("--pose_overlap", type=int, default=120,
+                        help="Overlap frames between pose windows")
+    parser.add_argument("--stream_threshold", type=int, default=2000,
+                        help="Route to streaming path above this selected frame count")
     parser.add_argument("--dino_model", type=str, default="dinov3_vits16plus")
     parser.add_argument("--depth_mode", type=str, default="video_depth_anything",
                         choices=["video_depth_anything", "vda", "da3", "depth_pro"])
@@ -250,8 +276,14 @@ def main():
 
     for video_path in tqdm(videos, desc="Extracting features"):
         video_id = video_id_from_path(video_path, stem_only=args.id_from_stem)
-        frame_indices = sample_frame_indices(video_path, args.frames_per_video)
+        try:
+            frame_indices = sample_frame_indices(video_path, args.frames_per_video)
+        except Exception as e:
+            print(f"  [ERROR] {video_id}: failed to read/sample frames: {e}")
+            failures += 1
+            continue
 
+        stream = should_stream(len(frame_indices), args.stream_threshold)
         ok = extract_single_video(
             video_path=video_path,
             video_id=video_id,
@@ -260,8 +292,11 @@ def main():
             extractor_pose=extractor_pose,
             store=store,
             frame_indices=frame_indices,
+            branches=branches,
             future_horizon=args.future_horizon,
             resume=args.resume,
+            stream=stream,
+            block_size=args.block_size,
         )
 
         if ok:
