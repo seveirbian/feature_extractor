@@ -232,6 +232,37 @@ class DINOExtractor:
 
         return np.stack(all_features, axis=0).astype(np.float32)
 
+    def extract_video_streaming(
+        self,
+        video_path: str,
+        frame_indices: list[int],
+        store,
+        video_id: str,
+        block_size: int = 1024,
+    ) -> None:
+        """Stream DINO features to ``store`` block-by-block (bounded memory).
+
+        Writes directly via ``store.write_dino_chunk`` instead of returning one
+        large array, so host RAM stays bounded by a single block.
+        """
+        from ..chunking import iter_frame_blocks
+
+        first = True
+        for block_idx, frames, write_offset in iter_frame_blocks(
+            video_path, frame_indices, block_size, overlap=0
+        ):
+            feats = np.stack(
+                [self.extract_frame(frames[j]) for j in range(frames.shape[0])], axis=0
+            ).astype(np.float32)
+            feats = feats[write_offset:]
+            out_idx = block_idx[write_offset:]
+            if len(feats) == 0:
+                continue
+            store.write_dino_chunk(video_id, feats, out_idx, reset=first)
+            first = False
+            del feats
+        store.mark_branch_complete(video_id, "dino")
+
     def get_patch_grid_size(self, h: int, w: int) -> tuple[int, int]:
         """Return the number of patches in height and width for a given image size."""
         return h // self.patch_size, w // self.patch_size
