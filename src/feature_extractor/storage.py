@@ -165,6 +165,76 @@ class FeatureStore:
             grp.attrs["shape"] = features.shape
             grp.attrs["representation"] = "patch_tokens" if features.ndim == 3 else "global_descriptor"
 
+    def _append_or_create(
+        self,
+        grp: h5py.Group,
+        name: str,
+        data: np.ndarray,
+        *,
+        reset: bool,
+        chunks: tuple[int, ...],
+    ) -> None:
+        """Create a resizable dataset on reset, else resize axis 0 and append."""
+        if reset:
+            if name in grp:
+                del grp[name]
+            maxshape = (None,) + data.shape[1:]
+            grp.create_dataset(
+                name,
+                data=data,
+                maxshape=maxshape,
+                chunks=chunks,
+                dtype=data.dtype,
+                **self._compression_kwargs(),
+            )
+        else:
+            dset = grp[name]
+            n = dset.shape[0]
+            dset.resize(n + data.shape[0], axis=0)
+            dset[n:] = data
+
+    def write_dino_chunk(
+        self,
+        video_id: str,
+        features: np.ndarray,
+        frame_indices: np.ndarray,
+        *,
+        reset: bool,
+    ) -> None:
+        """Append a block of DINO features to a resizable dataset."""
+        features = np.asarray(features, dtype=np.float32)
+        if features.ndim not in (2, 3):
+            raise ValueError(f"DINO features must be (T,D) or (T,N,D), got {features.shape}")
+        frame_indices = np.asarray(frame_indices, dtype=np.int64)
+        chunks = (1,) + features.shape[1:]
+        with self._get_file(video_id, mode="a") as f:
+            grp = f.require_group("dino")
+            self._append_or_create(grp, "features", features, reset=reset, chunks=chunks)
+            self._append_or_create(
+                grp, "frame_indices", frame_indices, reset=reset,
+                chunks=(min(1024, len(frame_indices) or 1),),
+            )
+            if reset:
+                grp.attrs["complete"] = False
+                grp.attrs["representation"] = (
+                    "patch_tokens" if features.ndim == 3 else "global_descriptor"
+                )
+
+    def mark_branch_complete(self, video_id: str, branch: FeatureBranch) -> None:
+        with self._get_file(video_id, mode="a") as f:
+            f.require_group(branch).attrs["complete"] = True
+
+    def is_branch_complete(self, video_id: str, branch: FeatureBranch) -> bool:
+        if not self.exists(video_id):
+            return False
+        with self._get_file(video_id, mode="r") as f:
+            if branch not in f:
+                return False
+            return bool(f[branch].attrs.get("complete", False))
+
+    def is_video_complete(self, video_id: str, branches: list[FeatureBranch]) -> bool:
+        return all(self.is_branch_complete(video_id, b) for b in branches)
+
     def write_dino_camera(
         self,
         video_id: str,
