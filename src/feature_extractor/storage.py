@@ -235,6 +235,58 @@ class FeatureStore:
     def is_video_complete(self, video_id: str, branches: list[FeatureBranch]) -> bool:
         return all(self.is_branch_complete(video_id, b) for b in branches)
 
+    def write_depth_chunk(
+        self,
+        video_id: str,
+        inv_depth: np.ndarray,
+        frame_indices: np.ndarray,
+        *,
+        reset: bool,
+    ) -> None:
+        """Append a block of normalized inverse depth as uint16."""
+        inv_depth = self._normalize_depth(inv_depth)
+        frame_indices = np.asarray(frame_indices, dtype=np.int64)
+        u16 = (np.clip(inv_depth, 0.0, 1.0) * 65535.0).round().astype(np.uint16)
+        chunks = (1, u16.shape[1], u16.shape[2], 1)
+        with self._get_file(video_id, mode="a") as f:
+            grp = f.require_group("depth")
+            self._append_or_create(grp, "inv_depth", u16, reset=reset, chunks=chunks)
+            self._append_or_create(
+                grp, "frame_indices", frame_indices, reset=reset,
+                chunks=(min(1024, len(frame_indices) or 1),),
+            )
+            if reset:
+                grp.attrs["complete"] = False
+                grp.attrs["scale"] = 65535.0
+                grp.attrs["representation"] = "normalized_inverse_depth"
+
+    def write_pose_chunk(
+        self,
+        video_id: str,
+        se3_trajectory: np.ndarray,
+        frame_indices: np.ndarray,
+        *,
+        reset: bool,
+        representation: str | None = None,
+    ) -> None:
+        """Append a block of pose targets (T, P)."""
+        pose = self._normalize_pose(se3_trajectory)
+        frame_indices = np.asarray(frame_indices, dtype=np.int64)
+        if representation is None:
+            representation = "se3_log" if pose.shape[1] == 6 else "translation_rot6d"
+        chunks = (1, pose.shape[1])
+        with self._get_file(video_id, mode="a") as f:
+            grp = f.require_group("pose")
+            self._append_or_create(grp, "se3_trajectory", pose, reset=reset, chunks=chunks)
+            self._append_or_create(
+                grp, "frame_indices", frame_indices, reset=reset,
+                chunks=(min(1024, len(frame_indices) or 1),),
+            )
+            if reset:
+                grp.attrs["complete"] = False
+                grp.attrs["pose_dim"] = pose.shape[1]
+                grp.attrs["representation"] = representation
+
     def write_dino_camera(
         self,
         video_id: str,
