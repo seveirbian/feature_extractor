@@ -38,8 +38,12 @@ sliding-window inference and DINO/Depth-Pro run per-frame. The blowup is host RA
 ### Constraints (from requirements gathering)
 
 - Videos up to **10 min @ 30 Hz = ~18,000 frames**.
-- **GPU 32 GB, host RAM 32 GB.** Raw RGB for 18k frames alone is ~16 GB — the
-  whole video cannot live in RAM at once.
+- Hardware: **16 CPU, 500 GB host RAM, 32 GB GPU.** Host RAM is abundant — even
+  the whole video (~16 GB raw) and VDA's ~44 GB double buffer fit easily — so the
+  **binding constraint is GPU memory (32 GB)**, which caps the VGGT pose window.
+  Streaming is still required because (a) VGGT is O(W²) and must be windowed
+  regardless of RAM, and (b) incremental writes give crash-safety; but block sizes
+  can be generous.
 - **All three branches** (DINO, Depth, Pose) must produce **true full-frame**
   output.
 - Cross-chunk consistency: **overlap-based stitching/alignment is acceptable**
@@ -260,12 +264,18 @@ flag is also provided.
 
 ### New CLI arguments
 
-- `--block_size` (DINO/Depth segment length, default 512)
-- `--pose_window` (default = pose `max_frames`, 600)
-- `--depth_overlap` (default 64), `--pose_overlap` (default 96) — intentionally
-  large per the consistency requirement
-- `--stream_threshold` (default 2000)
-- `--isolate_subprocess` (optional, default off)
+Defaults tuned for the target hardware (16 CPU / 500 GB RAM / 32 GB GPU). Only
+`--pose_window` is GPU-bound; the rest are generous given abundant RAM and mainly
+affect throughput.
+
+| Argument | Default | Rationale |
+|----------|---------|-----------|
+| `--pose_window` | 600 | GPU-bound. Matches the existing `max_frames=600`, already validated running 600-frame VGGT inference on the 32 GB GPU; larger risks OOM. |
+| `--pose_overlap` | 120 | ~20% of the window; large to suppress cross-window drift per the consistency requirement. |
+| `--block_size` | 1024 | DINO/Depth segment length. RAM is abundant; 1024-frame VDA double buffer is ~2.5 GB. |
+| `--depth_overlap` | 96 | ~9% of the segment; enough for robust scale alignment without excessive recomputation. |
+| `--stream_threshold` | 2000 | Above this frame count, route to the streaming path; small samples keep the in-memory path. |
+| `--isolate_subprocess` | off | Bounded memory + 500 GB headroom make it unnecessary; kept as a fallback. |
 
 ### Batch resilience (fixes the original bug)
 
