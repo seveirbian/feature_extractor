@@ -24,7 +24,8 @@
 src/feature_extractor/
   cli.py            # feature-extract 命令:遍历视频 → 调用各分支 → 写 store
   extractors/       # dino.py / depth.py / pose.py 三个提取器
-  storage.py        # FeatureStore:HDF5 读写
+  storage.py        # FeatureStore:HDF5 读写(含增量分块写 + 完成标记)
+  chunking.py       # 流式分块:plan_blocks / iter_frame_blocks(见第 6.1 节)
   video_io.py       # decord 兼容的视频读取(AV1 走 PyAV 回退)
   assets.py         # 模型资源根目录解析
   validation/       # feature-validate 自验证工具(见第 8 节)
@@ -78,6 +79,8 @@ obsutil cp obs://cloudrobo-model/wangchao/egoWM/third_party/VGGT/checkpoints    
 - **分辨率/帧率**:任意;各模型内部自行 resize。
 - **帧采样**:`--frames_per_video N` 在整段视频上**均匀步采**最多 N 帧;`<=0` 或大于
   总帧数则取全部。三分支用同一组索引。
+  > 采样帧数超过 `--stream_threshold`(默认 2000,如全帧长视频)时自动切换到**流式分块
+  > 提取**,内存按块封顶、逐块写盘,避免长视频 OOM(见第 6.1 节)。
 - **video_id(输出文件名)**:默认 `<父目录名>_<文件名stem>`;加 `--id_from_stem` 则只用
   `<stem>`。
   > ⚠️ **注意命名冲突**:若不同子目录下存在同名视频(如 LeRobot 的
@@ -174,15 +177,25 @@ CUDA_VISIBLE_DEVICES=7 uv run feature-extract \
 | `--output_root` | 必填 | 输出目录 |
 | `--branches` | `dino,depth,pose` | 要跑的分支 |
 | `--depth_mode` | `video_depth_anything` | 深度后端(见第 7 节) |
-| `--frames_per_video` | `120` | 每视频最多采样帧数 |
+| `--frames_per_video` | `120` | 每视频最多采样帧数;`<=0` 取全部 |
 | `--device` | `cuda` | 计算设备 |
 | `--id_from_stem` | 关 | video_id 只用文件名 stem(见第 4 节命名冲突) |
 | `--num_samples` | 全部 | 只处理前 N 个视频(调试用) |
-| `--resume` | 关 | 跳过已存在的输出 |
+| `--resume` | 关 | 跳过**所有请求分支都已完成**的视频(见第 6.1 节) |
 | `--dino_model` | `dinov3_vits16plus` | DINO 模型(见下方可选 backbone) |
 | `--vda_input_size` | `224` | Video-Depth-Anything 输入边长 |
 | `--assets_root` | 无 | 覆盖模型资源根目录 |
 | `--annotation_dir` | `<output_root>/annotations` | 标注输出目录 |
+
+全帧流式提取相关参数(见第 6.1 节):
+
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| `--stream_threshold` | `2000` | 采样帧数超过此值时切换到流式分块提取 |
+| `--block_size` | `1024` | DINO/Depth 流式分块的块长(帧) |
+| `--depth_overlap` | `96` | Depth 分段间的重叠帧数(预留,Phase 2 生效) |
+| `--pose_window` | `600` | Pose(VGGT)窗口长度,受显存约束(预留,Phase 3 生效) |
+| `--pose_overlap` | `120` | Pose 窗口间的重叠帧数(预留,Phase 3 生效) |
 
 ### DINO backbone(`--dino_model`)
 
@@ -228,6 +241,32 @@ dino = DINOExtractor(model_name="dinov3_vits16", device="cuda")   # 或 dinov3_v
 feats = dino.extract_video("clip.mp4", frame_indices=[0, 8, 16])  # (3, 1025, 384)
 ```
 
+### 6.1 全帧流式提取与批处理容错
+
+针对**长视频全帧提取**(如 10 分钟 @30Hz ≈ 18000 帧)新增流式路径,解决"整段一次性载入
+内存导致 OOM、进程被杀、目录内剩余视频不再处理"的问题。
+
+- **自动触发**:当某视频的采样帧数 `> --stream_threshold` 时,该视频走**流式分块提取**——
+  按 `--block_size` 逐块读帧、推理、**增量写入 HDF5**,任一时刻内存只占一个块,不随视频
+  长度增长。帧数少于阈值时仍走原内存路径,输出格式完全一致。
+- **增量写盘 + 完成标记**:每块写完即落盘;分支全部写完后打 `complete=True` 标记。
+  崩溃只会留下带部分数据的 `.h5`,不会丢已写块。
+- **`--resume` 语义**:改为跳过"**所请求分支全部 `complete`**"的视频;上次崩溃留下的
+  半成品(无 `complete` 标记)会被**重跑覆盖**而非误跳过。
+- **批处理容错**:单个视频失败(损坏文件、读帧异常等)只计入 `Failures` 并继续下一个,
+  **不再中止整批**。
+
+```bash
+# DINO 全帧流式提取(块长 512)
+uv run feature-extract \
+    --data_root data/clips --output_root data/features \
+    --branches dino --frames_per_video 0 --block_size 512
+```
+
+> ⚠️ **当前仅 `dino` 分支支持全帧流式**。`depth` / `pose` 仍走内存路径,对超长视频全帧仍会
+> OOM;`--depth_overlap` / `--pose_window` / `--pose_overlap` 参数已预留,将在 Phase 2/3
+> (Depth 分段对齐、Pose 滑窗拼接)启用。做长视频全帧时,请先只对 `--branches dino` 使用。
+
 ## 7. 深度模式(`--depth_mode`)
 
 默认 `video_depth_anything`(需对应权重)。各模式权重须已在 `third_party/.../checkpoints/`:
@@ -271,6 +310,8 @@ feats = dino.extract_video("clip.mp4", frame_indices=[0, 8, 16])  # (3, N+1, 384
 - **video_id 命名冲突**:见第 4 节;多相机/多 chunk 同名文件会互相覆盖,交接后若处理
   LeRobot 类数据需先解决命名。
 - **Depth 有损**:逆深度按 uint16 存储,读出有 ≈1/65535 量化误差;平移为归一化尺度,非米制。
+- **全帧流式仅 DINO**:`depth` / `pose` 分支暂未流式化,对超长视频全帧仍会 OOM(Phase 2/3 处理);
+  相关重叠/窗口参数已预留但未生效。见第 6.1 节。
 - **LeRobot 数据**:常把多条 episode 打包进少数 chunk mp4,模块按**整文件**采样,不按
   episode 切分。如需逐 episode,需额外读 `episode_index` 自行分段。
 - **性能为解码受限**:对长视频做稀疏采样时,解码(尤其 AV1 软解)往往是主要开销,推理占比小;
