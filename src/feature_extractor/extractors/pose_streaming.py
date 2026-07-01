@@ -53,3 +53,41 @@ def apply_similarity_to_poses(
     centers = poses_c2w[:, :3, 3]
     out[:, :3, 3] = s * (centers @ R.T) + t[None]
     return out
+
+
+def _orthonormalize(m: np.ndarray) -> np.ndarray:
+    u, _, vt = np.linalg.svd(m)
+    R = u @ vt
+    if np.linalg.det(R) < 0:
+        u[:, -1] *= -1
+        R = u @ vt
+    return R
+
+
+def robust_similarity(
+    src_poses_c2w: np.ndarray, dst_poses_c2w: np.ndarray, min_spread: float = 1e-4
+) -> tuple[float, np.ndarray, np.ndarray]:
+    """Estimate ``(s, R, t)`` mapping ``src`` camera poses onto ``dst``.
+
+    Uses Umeyama on camera centers when they have enough spread; otherwise (near
+    stationary) falls back to a rotation-only fit from the pose orientations with
+    unit scale.
+    """
+    src_poses_c2w = np.asarray(src_poses_c2w, dtype=np.float64)
+    dst_poses_c2w = np.asarray(dst_poses_c2w, dtype=np.float64)
+    src_c = src_poses_c2w[:, :3, 3]
+    dst_c = dst_poses_c2w[:, :3, 3]
+    spread = float(np.sqrt(((src_c - src_c.mean(0)) ** 2).sum(axis=1)).mean())
+
+    if spread >= min_spread and src_c.shape[0] >= 3:
+        s, R, t = umeyama_similarity(src_c, dst_c)
+        if np.isfinite(s) and s > 0 and np.isfinite(R).all() and np.isfinite(t).all():
+            return s, R, t
+
+    # Rotation-only fallback: R aligns src orientations to dst orientations.
+    m = np.zeros((3, 3))
+    for i in range(src_poses_c2w.shape[0]):
+        m += dst_poses_c2w[i, :3, :3] @ src_poses_c2w[i, :3, :3].T
+    R = _orthonormalize(m)
+    t = dst_c.mean(0) - (R @ src_c.mean(0))
+    return 1.0, R, t

@@ -64,3 +64,31 @@ def test_apply_identity_similarity_noop():
     G = _c2w(_rot([1, 0, 0], 0.3), np.array([1.0, 2.0, 3.0]))[None]
     out = apply_similarity_to_poses(G, 1.0, np.eye(3), np.zeros(3))
     np.testing.assert_allclose(out, G, atol=1e-9)
+
+
+from feature_extractor.extractors.pose_streaming import robust_similarity
+
+
+def test_robust_similarity_matches_umeyama_for_normal_motion():
+    src = np.array([[0.0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 0]])
+    R_true = _rot([0.3, 0.2, 1.0], 0.5)
+    s_true, t_true = 1.0, np.array([2.0, 0.0, -1.0])
+    dst = s_true * (src @ R_true.T) + t_true
+    src_poses = np.stack([_c2w(np.eye(3), c) for c in src])
+    dst_poses = np.stack([_c2w(R_true, c) for c in dst])
+
+    s, R, t = robust_similarity(src_poses, dst_poses)
+    np.testing.assert_allclose(s * (src @ R.T) + t, dst, atol=1e-6)
+
+
+def test_robust_similarity_stationary_falls_back_without_crash():
+    # all centers identical (camera stationary): Umeyama on centers is degenerate
+    C = np.array([1.0, 2.0, 3.0])
+    R_rel = _rot([0, 0, 1], 0.5)
+    src_poses = np.stack([_c2w(_rot([0, 0, 1], a), C) for a in (0.0, 0.1, 0.2)])
+    dst_poses = np.stack([_c2w(R_rel @ p[:3, :3], C) for p in src_poses])
+
+    s, R, t = robust_similarity(src_poses, dst_poses)
+    assert np.isfinite(s) and np.isfinite(R).all() and np.isfinite(t).all()
+    assert abs(s - 1.0) < 1e-6                       # fallback keeps unit scale
+    np.testing.assert_allclose(R, R_rel, atol=1e-6)  # recovered from orientations
