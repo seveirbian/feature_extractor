@@ -35,3 +35,21 @@ def umeyama_similarity(src: np.ndarray, dst: np.ndarray) -> tuple[float, np.ndar
     scale = float(np.trace(np.diag(d) @ s_corr) / var_s)
     t = mu_d - scale * (R @ mu_s)
     return scale, R, t
+
+
+def apply_similarity_to_poses(
+    poses_c2w: np.ndarray, s: float, R: np.ndarray, t: np.ndarray
+) -> np.ndarray:
+    """Apply world similarity ``(s, R, t)`` to camera-to-world poses ``(N,4,4)``.
+
+    ``center' = s*R@center + t``; ``rotation' = R @ rotation`` (scale does not
+    affect orientation). Returns a new ``(N,4,4)`` array.
+    """
+    poses_c2w = np.asarray(poses_c2w, dtype=np.float64)
+    R = np.asarray(R, dtype=np.float64)
+    t = np.asarray(t, dtype=np.float64)
+    out = np.tile(np.eye(4), (poses_c2w.shape[0], 1, 1))
+    out[:, :3, :3] = R[None] @ poses_c2w[:, :3, :3]
+    centers = poses_c2w[:, :3, 3]
+    out[:, :3, 3] = s * (centers @ R.T) + t[None]
+    return out

@@ -35,3 +35,32 @@ def test_umeyama_identity_when_equal():
     assert abs(s - 1.0) < 1e-9
     np.testing.assert_allclose(R, np.eye(3), atol=1e-9)
     np.testing.assert_allclose(t, np.zeros(3), atol=1e-9)
+
+
+from feature_extractor.extractors.pose_streaming import apply_similarity_to_poses
+
+
+def _c2w(R, C):
+    G = np.eye(4)
+    G[:3, :3] = R
+    G[:3, 3] = C
+    return G
+
+
+def test_apply_similarity_transforms_center_and_rotation():
+    R_pose = _rot([0, 0, 1], 0.4)
+    G = _c2w(R_pose, np.array([2.0, 0.0, 1.0]))[None]  # (1,4,4)
+
+    R_s = _rot([0, 1, 0], 0.9)
+    s, t = 3.0, np.array([1.0, 1.0, 1.0])
+    out = apply_similarity_to_poses(G, s, R_s, t)
+
+    np.testing.assert_allclose(out[0, :3, 3], s * (R_s @ G[0, :3, 3]) + t, atol=1e-9)
+    np.testing.assert_allclose(out[0, :3, :3], R_s @ G[0, :3, :3], atol=1e-9)
+    assert out[0, 3, 3] == 1.0
+
+
+def test_apply_identity_similarity_noop():
+    G = _c2w(_rot([1, 0, 0], 0.3), np.array([1.0, 2.0, 3.0]))[None]
+    out = apply_similarity_to_poses(G, 1.0, np.eye(3), np.zeros(3))
+    np.testing.assert_allclose(out, G, atol=1e-9)
