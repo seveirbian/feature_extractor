@@ -27,3 +27,28 @@ def test_keyframes_single_frame_segment():
 
 def test_keyframes_empty():
     assert plan_segment_keyframes([], last_kf_source_idx=None, keyframe_interval=30) == []
+
+
+from feature_extractor.extractors.depth_streaming import interpolate_segment_params
+
+
+def test_interpolate_linear_between_two_anchors():
+    # anchors: (source_idx, scale, shift)
+    anchors = [(0, 2.0, 1.0), (4, 6.0, 5.0)]
+    scales, shifts = interpolate_segment_params([0, 1, 2, 3, 4], anchors)
+    np.testing.assert_allclose(scales, [2.0, 3.0, 4.0, 5.0, 6.0])
+    np.testing.assert_allclose(shifts, [1.0, 2.0, 3.0, 4.0, 5.0])
+
+
+def test_interpolate_uses_carried_anchor_before_segment():
+    # carried anchor at src 10 (before segment), in-segment keyframe at src 14
+    anchors = [(10, 1.0, 0.0), (14, 5.0, 8.0)]
+    scales, shifts = interpolate_segment_params([11, 12, 13, 14], anchors)
+    np.testing.assert_allclose(scales, [2.0, 3.0, 4.0, 5.0])
+    np.testing.assert_allclose(shifts, [2.0, 4.0, 6.0, 8.0])
+
+
+def test_interpolate_constant_single_anchor():
+    scales, shifts = interpolate_segment_params([3, 4], [(3, 2.5, 1.5)])
+    np.testing.assert_allclose(scales, [2.5, 2.5])
+    np.testing.assert_allclose(shifts, [1.5, 1.5])
