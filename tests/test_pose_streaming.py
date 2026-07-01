@@ -92,3 +92,22 @@ def test_robust_similarity_stationary_falls_back_without_crash():
     assert np.isfinite(s) and np.isfinite(R).all() and np.isfinite(t).all()
     assert abs(s - 1.0) < 1e-6                       # fallback keeps unit scale
     np.testing.assert_allclose(R, R_rel, atol=1e-6)  # recovered from orientations
+
+
+from feature_extractor.extractors.pose import PoseExtractor
+
+
+def test_relative_se3_row0_is_identity_pose():
+    # two world-to-camera extrinsics; relative to row 0 must give identity at row 0
+    E = np.stack([np.eye(4), _c2w(_rot([0, 0, 1], 0.5), np.array([1.0, 0, 0]))])
+    rel = PoseExtractor._relative_se3_from_extrinsics(E)
+    assert rel.shape == (2, 9)
+    # identity pose: translation 0, rot6d = first two columns of I = [1,0,0, 0,1,0]
+    np.testing.assert_allclose(rel[0], [0, 0, 0, 1, 0, 0, 0, 1, 0], atol=1e-6)
+
+
+def test_relative_se3_explicit_reference():
+    E = np.stack([np.eye(4), _c2w(_rot([0, 0, 1], 0.5), np.array([1.0, 0, 0]))])
+    # reference = row 1 -> row 1 becomes identity
+    rel = PoseExtractor._relative_se3_from_extrinsics(E, ref_extrinsic=E[1])
+    np.testing.assert_allclose(rel[1], [0, 0, 0, 1, 0, 0, 0, 1, 0], atol=1e-6)

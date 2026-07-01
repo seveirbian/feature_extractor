@@ -225,12 +225,26 @@ class PoseExtractor:
         pose_enc = outputs["pose_enc"].squeeze(0).float().cpu().numpy()
         return pose_enc, image_hw
 
-    def _pose_enc_sequence_to_relative_se3(
-        self,
-        pose_enc: np.ndarray,
-        image_hw: tuple[int, int],
+    @staticmethod
+    def _relative_se3_from_extrinsics(
+        extrinsics_h: np.ndarray, ref_extrinsic: Optional[np.ndarray] = None
     ) -> np.ndarray:
-        """Convert VGGT sequence pose encodings into frame-0-relative extrinsics."""
+        """Frame-relative 9D poses from world-to-camera extrinsics ``(T,4,4)``.
+
+        ``rel = E_i @ inv(ref)``; ``ref`` defaults to ``extrinsics_h[0]``.
+        """
+        extrinsics_h = np.asarray(extrinsics_h, dtype=np.float32)
+        ref = extrinsics_h[0] if ref_extrinsic is None else np.asarray(ref_extrinsic, dtype=np.float32)
+        ref_inv = np.linalg.inv(ref)
+        rel_extrinsics = extrinsics_h @ ref_inv[None, :, :]
+        rel_se3 = [
+            pose_to_se3(extr[:3, 3].astype(np.float32), rotation_to_6d(extr[:3, :3].astype(np.float32)))
+            for extr in rel_extrinsics
+        ]
+        return np.stack(rel_se3, axis=0).astype(np.float32)
+
+    def _pose_enc_to_extrinsics(self, pose_enc: np.ndarray, image_hw: tuple[int, int]) -> np.ndarray:
+        """VGGT pose encodings -> homogeneous world-to-camera extrinsics ``(T,4,4)``."""
         import sys
 
         vggt_repo, _checkpoint_path = _resolve_local_vggt_paths(self.assets_root)
@@ -245,18 +259,22 @@ class PoseExtractor:
             build_intrinsics=False,
         )
         extrinsics_np = extrinsics.squeeze(0).float().cpu().numpy()
-
         extrinsics_h = np.tile(np.eye(4, dtype=np.float32)[None, :, :], (extrinsics_np.shape[0], 1, 1))
         extrinsics_h[:, :3, :4] = extrinsics_np
-        ref_inv = np.linalg.inv(extrinsics_h[0])
-        rel_extrinsics = extrinsics_h @ ref_inv[None, :, :]
+        return extrinsics_h
 
-        rel_se3 = []
-        for extr in rel_extrinsics:
-            rel_t = extr[:3, 3].astype(np.float32)
-            rel_r6d = rotation_to_6d(extr[:3, :3].astype(np.float32))
-            rel_se3.append(pose_to_se3(rel_t, rel_r6d))
-        return np.stack(rel_se3, axis=0).astype(np.float32)
+    def _pose_enc_sequence_to_relative_se3(
+        self,
+        pose_enc: np.ndarray,
+        image_hw: tuple[int, int],
+    ) -> np.ndarray:
+        """Convert VGGT sequence pose encodings into frame-0-relative extrinsics."""
+        return self._relative_se3_from_extrinsics(self._pose_enc_to_extrinsics(pose_enc, image_hw))
+
+    def _window_extrinsics(self, frames) -> np.ndarray:
+        """Run VGGT on a window of frames and return world-to-camera ``(T,4,4)``."""
+        pose_enc, image_hw = self._infer_sequence_pose_enc(list(frames))
+        return self._pose_enc_to_extrinsics(pose_enc, image_hw)
 
     @torch.no_grad()
     def extract_frame(self, image: np.ndarray, ref_image: Optional[np.ndarray] = None) -> dict:
