@@ -111,3 +111,51 @@ def test_relative_se3_explicit_reference():
     # reference = row 1 -> row 1 becomes identity
     rel = PoseExtractor._relative_se3_from_extrinsics(E, ref_extrinsic=E[1])
     np.testing.assert_allclose(rel[1], [0, 0, 0, 1, 0, 0, 0, 1, 0], atol=1e-6)
+
+
+from feature_extractor.storage import FeatureStore
+from feature_extractor.validation.synthetic import make_ramp_video
+
+
+def _ramp_index(frame):
+    return int(round(float(frame.mean()) / 20.0))
+
+
+def _gt_c2w(i):
+    """Deterministic ground-truth camera-to-world for frame i (helix + yaw)."""
+    ang = 0.15 * i
+    R = _rot([0, 0, 1], ang)
+    C = np.array([np.cos(ang), np.sin(ang), 0.1 * i])
+    return _c2w(R, C)
+
+
+class _StubPose:
+    extract_video_pose_streaming = PoseExtractor.extract_video_pose_streaming
+    _relative_se3_from_extrinsics = staticmethod(PoseExtractor._relative_se3_from_extrinsics)
+
+    def _window_extrinsics(self, frames):
+        # recover frame indices from ramp content, apply a per-window similarity
+        idx = [_ramp_index(frames[j]) for j in range(len(frames))]
+        i0 = idx[0]
+        if i0 == 0:
+            s, R, t = 1.0, np.eye(3), np.zeros(3)        # window 0 defines global frame
+        else:
+            s, R, t = 1.0, _rot([0, 1, 0], 0.3 + 0.01 * i0), np.array([0.5 * i0, -0.2, 1.0])
+        c2w_local = apply_similarity_to_poses(np.stack([_gt_c2w(i) for i in idx]), s, R, t)
+        return np.linalg.inv(c2w_local).astype(np.float32)  # world-to-camera
+
+
+def test_pose_streaming_writes_every_frame(tmp_path):
+    path = str(tmp_path / "ramp.mp4")
+    make_ramp_video(path, codec="libx264", n_frames=10, width=64, height=48, step=20)
+    store = FeatureStore(str(tmp_path / "store"))
+
+    _StubPose().extract_video_pose_streaming(
+        path, list(range(10)), store, "clip", window=4, overlap=2)
+
+    pose = store.read_pose("clip")
+    assert pose.shape == (10, 9)
+    np.testing.assert_array_equal(store.read_frame_indices("clip", "pose"), list(range(10)))
+    assert store.is_branch_complete("clip", "pose") is True
+    # frame 0 is identity pose
+    np.testing.assert_allclose(pose[0], [0, 0, 0, 1, 0, 0, 0, 1, 0], atol=1e-4)

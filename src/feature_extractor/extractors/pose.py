@@ -556,6 +556,59 @@ class PoseExtractor:
         pose_enc, image_hw = self._infer_sequence_pose_enc(frames)
         return self._pose_enc_sequence_to_relative_se3(pose_enc, image_hw)
 
+    def extract_video_pose_streaming(
+        self,
+        video_path: str,
+        frame_indices: list[int],
+        store,
+        video_id: str,
+        window: int = 600,
+        overlap: int = 120,
+    ) -> None:
+        """Stream frame-0-relative pose to ``store`` over overlapping VGGT windows.
+
+        Each window's world-to-camera extrinsics are aligned into one global
+        camera-to-world trajectory (anchored at video frame 0) via a sim(3)
+        transform estimated from the overlap frames, then the non-overlap tail is
+        written incrementally as frame-0-relative 9D pose.
+        """
+        from ..chunking import iter_frame_blocks
+        from .pose_streaming import apply_similarity_to_poses, robust_similarity
+
+        prev_global_overlap = None   # (overlap,4,4) global c2w of previous window tail
+        frame0_w2c = None            # global world-to-camera of the video's frame 0
+        first = True
+
+        pbar = tqdm(total=len(frame_indices),
+                    desc=f"Pose stream [{Path(video_path).name}]", unit="f")
+        for block_idx, frames, write_offset in iter_frame_blocks(
+            video_path, frame_indices, window, overlap
+        ):
+            w2c = np.asarray(self._window_extrinsics(frames), dtype=np.float64)  # (b,4,4)
+            c2w_local = np.linalg.inv(w2c)
+
+            if prev_global_overlap is None:
+                c2w_global = c2w_local                       # window 0 defines global frame
+            else:
+                s, R, t = robust_similarity(c2w_local[:write_offset], prev_global_overlap)
+                c2w_global = apply_similarity_to_poses(c2w_local, s, R, t)
+
+            if frame0_w2c is None:
+                frame0_w2c = np.linalg.inv(c2w_global[0])
+
+            w2c_global = np.linalg.inv(c2w_global)
+            rel = self._relative_se3_from_extrinsics(
+                w2c_global[write_offset:].astype(np.float32), ref_extrinsic=frame0_w2c
+            )
+            store.write_pose_chunk(video_id, rel, block_idx[write_offset:], reset=first)
+            first = False
+            if overlap > 0:
+                prev_global_overlap = c2w_global[-overlap:].copy()
+            pbar.update(len(block_idx) - write_offset)
+
+        pbar.close()
+        store.mark_branch_complete(video_id, "pose")
+
     def save_trajectory(self, se3_trajectory: np.ndarray, output_path: str) -> None:
         """Save SE(3) trajectory to HDF5."""
         import h5py
