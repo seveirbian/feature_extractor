@@ -60,7 +60,7 @@ def main() -> int:
     parser.add_argument("--output_mp4", type=Path, required=True)
     parser.add_argument("--output_json", type=Path, default=None)
     parser.add_argument("--device", type=str, default="cuda")
-    parser.add_argument("--dino_model", type=str, default="dinov3_vits16plus")
+    parser.add_argument("--dino_model", type=str, default="dinov3_vits16")
     parser.add_argument("--render_scale", type=float, default=1.0)
     parser.add_argument("--panel_mode", type=str, default="rgb_pca_cls", choices=["rgb_pca", "rgb_pca_cls"])
     parser.add_argument("--start_frame", type=int, default=0, help="起始帧(默认 0)")

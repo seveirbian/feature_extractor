@@ -54,7 +54,7 @@ def _build_extractors(branches, depth_mode, device: torch.device, assets_root):
     """按需构建各分支提取器。"""
     dino = depth = pose = None
     if "dino" in branches:
-        dino = DINOExtractor(model_name="dinov3_vits16plus", device=device, assets_root=assets_root)
+        dino = DINOExtractor(model_name="dinov3_vits16", device=device, assets_root=assets_root)
     if "depth" in branches:
         depth = DepthExtractor(mode=depth_mode, device=device,
                                vda_input_size=224, assets_root=assets_root)

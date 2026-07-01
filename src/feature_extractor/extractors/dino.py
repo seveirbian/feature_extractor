@@ -26,12 +26,12 @@ class DINOExtractor:
     """Frozen DINO patch-token feature extractor.
 
     Extracts patch-level features plus one CLS token. The default DINOv3
-    ``dinov3_vits16plus`` output is ``(N_patches + 1, 384)`` at stride 16.
+    ``dinov3_vits16`` output is ``(N_patches + 1, 384)`` at stride 16.
 
     Args:
         model_name: Model variant. Options:
-            - "dinov3_vits16plus" (ViT-S/16+, 384-dim, default)
-            - "dinov3_vits16"    (ViT-S/16, 384-dim)
+            - "dinov3_vits16"     (ViT-S/16, 384-dim, default)
+            - "dinov3_vits16plus" (ViT-S/16+, 384-dim)
         device: torch device (cuda/cpu). If None, auto-detects.
         compile: Whether to torch.compile() the model (CUDA only).
     """
@@ -64,7 +64,7 @@ class DINOExtractor:
 
     def __init__(
         self,
-        model_name: str = "dinov3_vits16plus",
+        model_name: str = "dinov3_vits16",
         device: Optional[str] = None,
         compile: bool = False,
         input_color: Literal["rgb", "bgr"] = "rgb",

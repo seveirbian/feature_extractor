@@ -213,7 +213,7 @@ def main():
                         help="Overlap frames between pose windows")
     parser.add_argument("--stream_threshold", type=int, default=2000,
                         help="Route to streaming path above this selected frame count")
-    parser.add_argument("--dino_model", type=str, default="dinov3_vits16plus")
+    parser.add_argument("--dino_model", type=str, default="dinov3_vits16")
     parser.add_argument("--depth_mode", type=str, default="video_depth_anything",
                         choices=["video_depth_anything", "vda", "da3", "depth_pro"])
     parser.add_argument("--vda_input_size", type=int, default=224,
