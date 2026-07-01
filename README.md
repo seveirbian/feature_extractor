@@ -291,9 +291,13 @@ CUDA_VISIBLE_DEVICES=7 uv run feature-extract \
 且**不影响其余视频**(见上文「批处理容错」)。也可用 `python -m feature_extractor.cli ...`
 代替 `feature-extract`,参数完全相同。
 
-> ⚠️ **当前仅 `dino` 分支支持全帧流式**。`depth` / `pose` 仍走内存路径,对超长视频全帧仍会
-> OOM;`--depth_overlap` / `--pose_window` / `--pose_overlap` 参数已预留,将在 Phase 2/3
-> (Depth 分段对齐、Pose 滑窗拼接)启用。做长视频全帧时,请先只对 `--branches dino` 使用。
+> ⚠️ **当前 `dino` 与 `depth` 分支支持全帧流式**;`pose` 仍走内存路径,对超长视频全帧仍会
+> OOM。`--pose_window` / `--pose_overlap` 参数已预留,将在 Phase 3(Pose 滑窗拼接)启用。
+> 做长视频全帧时,请先只对 `--branches dino,depth` 使用。
+>
+> Depth 流式为**分段重叠 + 尺度对齐**:每段 VDA 推理后用重叠帧做原始域仿射对齐,再用
+> 全局间隔的 Depth Pro 关键帧标定到米制(锚点跨段携带),`--depth_overlap`(默认 96)控制
+> 重叠帧数,越大段边界越平滑。
 
 ## 7. 深度模式(`--depth_mode`)
 
@@ -368,8 +372,8 @@ assert store.is_branch_complete("clip", "dino") # 写盘完成标记
 - **video_id 命名冲突**:见第 4 节;多相机/多 chunk 同名文件会互相覆盖,交接后若处理
   LeRobot 类数据需先解决命名。
 - **Depth 有损**:逆深度按 uint16 存储,读出有 ≈1/65535 量化误差;平移为归一化尺度,非米制。
-- **全帧流式仅 DINO**:`depth` / `pose` 分支暂未流式化,对超长视频全帧仍会 OOM(Phase 2/3 处理);
-  相关重叠/窗口参数已预留但未生效。见第 6.1 节。
+- **全帧流式支持 DINO / Depth**:`pose` 分支暂未流式化,对超长视频全帧仍会 OOM(Phase 3 处理);
+  `--pose_window` / `--pose_overlap` 参数已预留但未生效。见第 6.1 节。
 - **LeRobot 数据**:常把多条 episode 打包进少数 chunk mp4,模块按**整文件**采样,不按
   episode 切分。如需逐 episode,需额外读 `episode_index` 自行分段。
 - **性能为解码受限**:对长视频做稀疏采样时,解码(尤其 AV1 软解)往往是主要开销,推理占比小;
