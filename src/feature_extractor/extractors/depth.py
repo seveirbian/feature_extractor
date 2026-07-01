@@ -528,6 +528,87 @@ class DepthExtractor:
 
         return np.stack(all_depths, axis=0).astype(np.float32)  # (T, H, W, 1)
 
+    def extract_video_depth_streaming(
+        self,
+        video_path: str,
+        frame_indices: list[int],
+        store,
+        video_id: str,
+        block_size: int = 1024,
+        overlap: int = 96,
+    ) -> None:
+        """Stream VDA inverse depth to ``store`` in overlapping segments.
+
+        Each segment is VDA-inferred, affine-aligned in the raw domain to the
+        previous segment's overlap, metricized with globally-spaced Depth Pro
+        keyframes (anchor carried across the boundary), converted to inverse
+        depth per frame, and its non-overlap tail written incrementally.
+        """
+        from ..chunking import iter_frame_blocks
+        from .depth_streaming import plan_segment_keyframes, interpolate_segment_params
+
+        prev_aligned_overlap = None      # (overlap,H,W) aligned raw of previous seg tail
+        last_kf = None                   # (source_idx, scale, shift) carried anchor
+        last_kf_source_idx = None
+        carry = overlap > 0              # carrying only valid when raw is aligned
+        first = True
+
+        pbar = tqdm(total=len(frame_indices),
+                    desc=f"Depth stream [{Path(video_path).name}]", unit="f")
+        for block_idx, frames, write_offset in iter_frame_blocks(
+            video_path, frame_indices, block_size, overlap
+        ):
+            seg_src = [int(x) for x in block_idx]
+
+            raw, _ = self.model.infer_video_depth(
+                frames, target_fps=30, input_size=self.vda_input_size,
+                device=self.device.type, fp32=self.device.type == "cpu",
+            )
+            raw = np.asarray(raw[: len(seg_src)], dtype=np.float32)  # (b,H,W)
+
+            # Raw-domain affine alignment to the running scale
+            if prev_aligned_overlap is not None and write_offset > 0:
+                scale, shift = self._fit_depth_affine(raw[:write_offset], prev_aligned_overlap)
+                raw = raw * scale + shift
+
+            # Metricize
+            if self.vda_metric:
+                metric = np.clip(raw, self.z_min, self.z_max)
+            else:
+                kf_rows = plan_segment_keyframes(
+                    seg_src, last_kf_source_idx if carry else None, self.keyframe_interval
+                )
+                anchors: list[tuple[int, float, float]] = []
+                if carry and last_kf is not None:
+                    anchors.append(last_kf)
+                for r in kf_rows:
+                    m = self._extract_depth_pro(frames[r])
+                    sc, sh = self._fit_depth_affine(raw[r], m)
+                    anchors.append((seg_src[r], float(sc), float(sh)))
+                scales, shifts = interpolate_segment_params(seg_src, anchors)
+                metric = np.clip(
+                    raw * scales[:, None, None] + shifts[:, None, None],
+                    self.z_min, self.z_max,
+                )
+                last_kf = anchors[-1]
+                last_kf_source_idx = anchors[-1][0]
+
+            inv = np.stack(
+                [self._to_inverse_depth(metric[r])[..., None] for r in range(len(seg_src))],
+                axis=0,
+            ).astype(np.float32)
+
+            store.write_depth_chunk(
+                video_id, inv[write_offset:], block_idx[write_offset:], reset=first
+            )
+            first = False
+            if overlap > 0:
+                prev_aligned_overlap = raw[-overlap:].copy()
+            pbar.update(len(block_idx) - write_offset)
+
+        pbar.close()
+        store.mark_branch_complete(video_id, "depth")
+
     def save_depth(self, inv_depths: np.ndarray, output_path: str) -> None:
         """Save inverse depth as uint16 HDF5 (compression-friendly)."""
         import h5py

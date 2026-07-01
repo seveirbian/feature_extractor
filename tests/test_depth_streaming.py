@@ -52,3 +52,62 @@ def test_interpolate_constant_single_anchor():
     scales, shifts = interpolate_segment_params([3, 4], [(3, 2.5, 1.5)])
     np.testing.assert_allclose(scales, [2.5, 2.5])
     np.testing.assert_allclose(shifts, [1.5, 1.5])
+
+
+import torch
+
+from feature_extractor.storage import FeatureStore
+from feature_extractor.validation.synthetic import make_ramp_video
+from feature_extractor.extractors.depth import DepthExtractor
+
+
+class _StubDepth:
+    """Drives extract_video_depth_streaming with fake VDA + Depth Pro models."""
+
+    extract_video_depth_streaming = DepthExtractor.extract_video_depth_streaming
+    _fit_depth_affine = staticmethod(DepthExtractor._fit_depth_affine)
+    _to_inverse_depth = DepthExtractor._to_inverse_depth
+
+    def __init__(self):
+        self.vda_metric = False
+        self.keyframe_interval = 2
+        self.z_min = 0.1
+        self.z_max = 100.0
+        self.vda_input_size = 224
+        self.device = torch.device("cpu")
+        self.model = self  # so self.model.infer_video_depth resolves here
+
+    def infer_video_depth(self, frames, target_fps=30, input_size=224, device="cpu", fp32=True):
+        # deterministic raw depth: each frame -> constant plane = mean/255 + 1
+        b = frames.shape[0]
+        raw = np.stack(
+            [np.full(frames.shape[1:3], float(frames[j].mean()) / 255.0 + 1.0, np.float32)
+             for j in range(b)]
+        )
+        return raw, target_fps
+
+    def _extract_depth_pro(self, frame):
+        # metric = 3 * raw(frame); fit should recover it, giving valid metric
+        val = float(frame.mean()) / 255.0 + 1.0
+        return np.full(frame.shape[:2], val * 3.0, np.float32)
+
+
+def test_depth_streaming_writes_every_frame(tmp_path):
+    path = str(tmp_path / "ramp.mp4")
+    make_ramp_video(path, codec="libx264", n_frames=10, width=64, height=48, step=20)
+    store = FeatureStore(str(tmp_path / "store"))
+
+    _StubDepth().extract_video_depth_streaming(
+        video_path=path,
+        frame_indices=list(range(10)),
+        store=store,
+        video_id="clip",
+        block_size=4,
+        overlap=2,
+    )
+
+    depth = store.read_depth("clip")
+    assert depth.shape == (10, 48, 64, 1)
+    assert np.isfinite(depth).all() and depth.min() >= 0.0 and depth.max() <= 1.0
+    np.testing.assert_array_equal(store.read_frame_indices("clip", "depth"), list(range(10)))
+    assert store.is_branch_complete("clip", "depth") is True
