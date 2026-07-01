@@ -243,24 +243,42 @@ class DINOExtractor:
         """Stream DINO features to ``store`` block-by-block (bounded memory).
 
         Writes directly via ``store.write_dino_chunk`` instead of returning one
-        large array, so host RAM stays bounded by a single block.
-        """
-        from ..chunking import iter_frame_blocks
+        large array, so host RAM stays bounded by a single ``block_size`` buffer.
 
+        DINO frames are independent, so this reads and infers frame-by-frame
+        (each frame advances the progress bar, covering both decode and
+        inference) and flushes a block to disk once the buffer fills.
+        """
+        from ..video_io import VideoReader, cpu
+
+        vr = VideoReader(video_path, ctx=cpu(0))
+        total_frames = len(vr)
+        idx = [int(i) for i in frame_indices if 0 <= int(i) < total_frames]
+
+        buf_feats: list[np.ndarray] = []
+        buf_idx: list[int] = []
         first = True
-        for block_idx, frames, write_offset in iter_frame_blocks(
-            video_path, frame_indices, block_size, overlap=0
-        ):
-            feats = np.stack(
-                [self.extract_frame(frames[j]) for j in range(frames.shape[0])], axis=0
-            ).astype(np.float32)
-            feats = feats[write_offset:]
-            out_idx = block_idx[write_offset:]
-            if len(feats) == 0:
-                continue
-            store.write_dino_chunk(video_id, feats, out_idx, reset=first)
+
+        def _flush() -> None:
+            nonlocal first
+            if not buf_feats:
+                return
+            store.write_dino_chunk(
+                video_id,
+                np.stack(buf_feats, axis=0).astype(np.float32),
+                np.asarray(buf_idx, dtype=np.int64),
+                reset=first,
+            )
             first = False
-            del feats
+            buf_feats.clear()
+            buf_idx.clear()
+
+        for i in tqdm(idx, desc=f"DINO stream [{Path(video_path).name}]", unit="f"):
+            buf_feats.append(self.extract_frame(vr[i].asnumpy()))
+            buf_idx.append(i)
+            if len(buf_feats) >= block_size:
+                _flush()
+        _flush()
         store.mark_branch_complete(video_id, "dino")
 
     def get_patch_grid_size(self, h: int, w: int) -> tuple[int, int]:
