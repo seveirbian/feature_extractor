@@ -40,7 +40,7 @@ def plan_segment_keyframes(
             rows.append(r)
             last = source_indices[r]
 
-    if rows[-1] != n - 1:
+    if not rows or rows[-1] != n - 1:
         rows.append(n - 1)
     return rows
 

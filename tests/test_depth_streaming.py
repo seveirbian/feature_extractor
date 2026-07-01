@@ -21,6 +21,12 @@ def test_keyframes_respect_global_spacing_with_carried_anchor():
     assert rows[-1] == 4           # last row forced
 
 
+def test_keyframes_carried_anchor_dominates_still_forces_last():
+    # every segment frame within interval of the carried keyframe -> only last row forced
+    rows = plan_segment_keyframes([4, 5, 6, 7], last_kf_source_idx=6, keyframe_interval=2)
+    assert rows == [3]
+
+
 def test_keyframes_single_frame_segment():
     assert plan_segment_keyframes([7], last_kf_source_idx=None, keyframe_interval=30) == [0]
 
@@ -111,3 +117,22 @@ def test_depth_streaming_writes_every_frame(tmp_path):
     assert np.isfinite(depth).all() and depth.min() >= 0.0 and depth.max() <= 1.0
     np.testing.assert_array_equal(store.read_frame_indices("clip", "depth"), list(range(10)))
     assert store.is_branch_complete("clip", "depth") is True
+
+
+def test_depth_streaming_boundary_matches_single_segment(tmp_path):
+    path = str(tmp_path / "ramp.mp4")
+    make_ramp_video(path, codec="libx264", n_frames=8, width=64, height=48, step=20)
+
+    store_a = FeatureStore(str(tmp_path / "a"))
+    _StubDepth().extract_video_depth_streaming(
+        path, list(range(8)), store_a, "clip", block_size=8, overlap=0)  # single segment
+    single = store_a.read_depth("clip")
+
+    store_b = FeatureStore(str(tmp_path / "b"))
+    _StubDepth().extract_video_depth_streaming(
+        path, list(range(8)), store_b, "clip", block_size=5, overlap=3)  # multi segment
+    stitched = store_b.read_depth("clip")
+
+    assert single.shape == stitched.shape == (8, 48, 64, 1)
+    # boundary frames (around row 5) should agree closely with the single-segment result
+    np.testing.assert_allclose(stitched[4:6], single[4:6], atol=2e-3)
