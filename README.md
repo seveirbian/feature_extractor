@@ -268,12 +268,28 @@ feats = dino.extract_video("clip.mp4", frame_indices=[0, 8, 16])  # (3, 1025, 38
 - **批处理容错**:单个视频失败(损坏文件、读帧异常等)只计入 `Failures` 并继续下一个,
   **不再中止整批**。
 
+**命令行用法**:
+
 ```bash
-# DINO 全帧流式提取(块长 512)
-uv run feature-extract \
+# 1) DINO 全帧流式提取(--frames_per_video 0 取全部帧;块长 512)
+CUDA_VISIBLE_DEVICES=7 uv run feature-extract \
     --data_root data/clips --output_root data/features \
     --branches dino --frames_per_video 0 --block_size 512
+
+# 2) 长视频 + 断点续跑(崩溃/中断后重跑,已完成的视频自动 [SKIP],半成品自动重跑覆盖)
+CUDA_VISIBLE_DEVICES=7 uv run feature-extract \
+    --data_root data/clips --output_root data/features \
+    --branches dino --frames_per_video 0 --block_size 512 --resume
+
+# 3) 显式调低触发阈值:让采样帧数 >64 的视频也走流式(调试/小显存时验证流式路径)
+CUDA_VISIBLE_DEVICES=7 uv run feature-extract \
+    --data_root data/clips --output_root data/features \
+    --branches dino --frames_per_video 0 --stream_threshold 64 --block_size 512
 ```
+
+跑完控制台会打印 `Successes / Failures / Output`;损坏或读帧失败的视频计入 `Failures`
+且**不影响其余视频**(见上文「批处理容错」)。也可用 `python -m feature_extractor.cli ...`
+代替 `feature-extract`,参数完全相同。
 
 > ⚠️ **当前仅 `dino` 分支支持全帧流式**。`depth` / `pose` 仍走内存路径,对超长视频全帧仍会
 > OOM;`--depth_overlap` / `--pose_window` / `--pose_overlap` 参数已预留,将在 Phase 2/3
