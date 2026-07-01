@@ -225,12 +225,26 @@ class PoseExtractor:
         pose_enc = outputs["pose_enc"].squeeze(0).float().cpu().numpy()
         return pose_enc, image_hw
 
-    def _pose_enc_sequence_to_relative_se3(
-        self,
-        pose_enc: np.ndarray,
-        image_hw: tuple[int, int],
+    @staticmethod
+    def _relative_se3_from_extrinsics(
+        extrinsics_h: np.ndarray, ref_extrinsic: Optional[np.ndarray] = None
     ) -> np.ndarray:
-        """Convert VGGT sequence pose encodings into frame-0-relative extrinsics."""
+        """Frame-relative 9D poses from world-to-camera extrinsics ``(T,4,4)``.
+
+        ``rel = E_i @ inv(ref)``; ``ref`` defaults to ``extrinsics_h[0]``.
+        """
+        extrinsics_h = np.asarray(extrinsics_h, dtype=np.float32)
+        ref = extrinsics_h[0] if ref_extrinsic is None else np.asarray(ref_extrinsic, dtype=np.float32)
+        ref_inv = np.linalg.inv(ref)
+        rel_extrinsics = extrinsics_h @ ref_inv[None, :, :]
+        rel_se3 = [
+            pose_to_se3(extr[:3, 3].astype(np.float32), rotation_to_6d(extr[:3, :3].astype(np.float32)))
+            for extr in rel_extrinsics
+        ]
+        return np.stack(rel_se3, axis=0).astype(np.float32)
+
+    def _pose_enc_to_extrinsics(self, pose_enc: np.ndarray, image_hw: tuple[int, int]) -> np.ndarray:
+        """VGGT pose encodings -> homogeneous world-to-camera extrinsics ``(T,4,4)``."""
         import sys
 
         vggt_repo, _checkpoint_path = _resolve_local_vggt_paths(self.assets_root)
@@ -245,18 +259,22 @@ class PoseExtractor:
             build_intrinsics=False,
         )
         extrinsics_np = extrinsics.squeeze(0).float().cpu().numpy()
-
         extrinsics_h = np.tile(np.eye(4, dtype=np.float32)[None, :, :], (extrinsics_np.shape[0], 1, 1))
         extrinsics_h[:, :3, :4] = extrinsics_np
-        ref_inv = np.linalg.inv(extrinsics_h[0])
-        rel_extrinsics = extrinsics_h @ ref_inv[None, :, :]
+        return extrinsics_h
 
-        rel_se3 = []
-        for extr in rel_extrinsics:
-            rel_t = extr[:3, 3].astype(np.float32)
-            rel_r6d = rotation_to_6d(extr[:3, :3].astype(np.float32))
-            rel_se3.append(pose_to_se3(rel_t, rel_r6d))
-        return np.stack(rel_se3, axis=0).astype(np.float32)
+    def _pose_enc_sequence_to_relative_se3(
+        self,
+        pose_enc: np.ndarray,
+        image_hw: tuple[int, int],
+    ) -> np.ndarray:
+        """Convert VGGT sequence pose encodings into frame-0-relative extrinsics."""
+        return self._relative_se3_from_extrinsics(self._pose_enc_to_extrinsics(pose_enc, image_hw))
+
+    def _window_extrinsics(self, frames) -> np.ndarray:
+        """Run VGGT on a window of frames and return world-to-camera ``(T,4,4)``."""
+        pose_enc, image_hw = self._infer_sequence_pose_enc(list(frames))
+        return self._pose_enc_to_extrinsics(pose_enc, image_hw)
 
     @torch.no_grad()
     def extract_frame(self, image: np.ndarray, ref_image: Optional[np.ndarray] = None) -> dict:
@@ -537,6 +555,59 @@ class PoseExtractor:
         frames = [vr[i].asnumpy() for i in tqdm(valid_indices, desc=f"PoseFrames [{Path(video_path).name}]")]
         pose_enc, image_hw = self._infer_sequence_pose_enc(frames)
         return self._pose_enc_sequence_to_relative_se3(pose_enc, image_hw)
+
+    def extract_video_pose_streaming(
+        self,
+        video_path: str,
+        frame_indices: list[int],
+        store,
+        video_id: str,
+        window: int = 600,
+        overlap: int = 120,
+    ) -> None:
+        """Stream frame-0-relative pose to ``store`` over overlapping VGGT windows.
+
+        Each window's world-to-camera extrinsics are aligned into one global
+        camera-to-world trajectory (anchored at video frame 0) via a sim(3)
+        transform estimated from the overlap frames, then the non-overlap tail is
+        written incrementally as frame-0-relative 9D pose.
+        """
+        from ..chunking import iter_frame_blocks
+        from .pose_streaming import apply_similarity_to_poses, robust_similarity
+
+        prev_global_overlap = None   # (overlap,4,4) global c2w of previous window tail
+        frame0_w2c = None            # global world-to-camera of the video's frame 0
+        first = True
+
+        pbar = tqdm(total=len(frame_indices),
+                    desc=f"Pose stream [{Path(video_path).name}]", unit="f")
+        for block_idx, frames, write_offset in iter_frame_blocks(
+            video_path, frame_indices, window, overlap
+        ):
+            w2c = np.asarray(self._window_extrinsics(frames), dtype=np.float64)  # (b,4,4)
+            c2w_local = np.linalg.inv(w2c)
+
+            if prev_global_overlap is None:
+                c2w_global = c2w_local                       # window 0 defines global frame
+            else:
+                s, R, t = robust_similarity(c2w_local[:write_offset], prev_global_overlap)
+                c2w_global = apply_similarity_to_poses(c2w_local, s, R, t)
+
+            if frame0_w2c is None:
+                frame0_w2c = np.linalg.inv(c2w_global[0])
+
+            w2c_global = np.linalg.inv(c2w_global)
+            rel = self._relative_se3_from_extrinsics(
+                w2c_global[write_offset:].astype(np.float32), ref_extrinsic=frame0_w2c
+            )
+            store.write_pose_chunk(video_id, rel, block_idx[write_offset:], reset=first)
+            first = False
+            if overlap > 0:
+                prev_global_overlap = c2w_global[-overlap:].copy()
+            pbar.update(len(block_idx) - write_offset)
+
+        pbar.close()
+        store.mark_branch_complete(video_id, "pose")
 
     def save_trajectory(self, se3_trajectory: np.ndarray, output_path: str) -> None:
         """Save SE(3) trajectory to HDF5."""

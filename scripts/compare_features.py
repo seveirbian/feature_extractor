@@ -90,11 +90,57 @@ def compare_dino(common, A, B, ia, ib):
     print(f"  relative L2     : avg={rl2.mean():.5f}  worst={rl2.max():.5f}")
 
 
+def _rot6d_to_matrix(r6d: np.ndarray) -> np.ndarray:
+    """Gram-Schmidt the 6D representation (two columns) back to a 3x3 rotation."""
+    a1, a2 = r6d[:3].astype(np.float64), r6d[3:].astype(np.float64)
+    b1 = a1 / (np.linalg.norm(a1) + 1e-12)
+    a2 = a2 - np.dot(b1, a2) * b1
+    b2 = a2 / (np.linalg.norm(a2) + 1e-12)
+    b3 = np.cross(b1, b2)
+    return np.stack([b1, b2, b3], axis=1)  # columns are the basis vectors
+
+
+def _pose9_to_center_and_rot(p9: np.ndarray):
+    """9D [t(3), rot6d(6)] (frame-0-relative world-to-camera) -> (center, R)."""
+    t = p9[:3].astype(np.float64)
+    R = _rot6d_to_matrix(p9[3:])         # world-to-camera rotation of the relative pose
+    center = -R.T @ t                    # camera center in the relative world frame
+    return center, R
+
+
 def compare_pose(common, A, B, ia, ib):
-    diffs = np.array([np.abs(A[ia[c]] - B[ib[c]]) for c in common])  # (n,9)
+    from feature_extractor.extractors.pose_streaming import umeyama_similarity
+
     print(f"  frames compared : {len(common)}")
-    print(f"  |diff| per-dim  : mean={diffs.mean(axis=0).round(4).tolist()}")
-    print(f"  |diff| overall  : avg={diffs.mean():.4f}  worst={diffs.max():.4f}")
+    # raw diff (will look large if the two runs use a different global scale)
+    raw = np.array([np.abs(A[ia[c]] - B[ib[c]]) for c in common])
+    print(f"  raw |diff| 9D   : avg={raw.mean():.4f}  worst={raw.max():.4f}  "
+          f"(受全局尺度影响,仅参考)")
+
+    ca = np.array([_pose9_to_center_and_rot(A[ia[c]])[0] for c in common])
+    cb = np.array([_pose9_to_center_and_rot(B[ib[c]])[0] for c in common])
+    Ra = [_pose9_to_center_and_rot(A[ia[c]])[1] for c in common]
+    Rb = [_pose9_to_center_and_rot(B[ib[c]])[1] for c in common]
+
+    # rotation geodesic error (scale-invariant)
+    ang = []
+    for r_a, r_b in zip(Ra, Rb):
+        cos = (np.trace(r_a.T @ r_b) - 1.0) / 2.0
+        ang.append(np.degrees(np.arccos(np.clip(cos, -1.0, 1.0))))
+    ang = np.array(ang)
+    print(f"  rotation err    : mean={ang.mean():.3f}°  worst={ang.max():.3f}°")
+
+    # translation ATE after sim(3) alignment of B's centers onto A's
+    if len(common) >= 3:
+        s, R, t = umeyama_similarity(cb, ca)
+        aligned = s * (cb @ R.T) + t
+        err = np.linalg.norm(ca - aligned, axis=1)
+        extent = np.linalg.norm(ca - ca.mean(0), axis=1).mean() + 1e-9
+        print(f"  global scale B→A: {s:.4f}   (两次归一化尺度之比)")
+        print(f"  translation ATE : rmse={np.sqrt((err**2).mean()):.4f}  worst={err.max():.4f}  "
+              f"(占轨迹尺度 {100*np.sqrt((err**2).mean())/extent:.2f}%)")
+    else:
+        print("  translation ATE : 需要 ≥3 个公共帧")
 
 
 def main():
