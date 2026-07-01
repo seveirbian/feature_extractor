@@ -310,12 +310,42 @@ CUDA_VISIBLE_DEVICES=7 uv run feature-validate --branches dino --skip-perf --rep
 
 ## 9. 作为库使用
 
+**一次性提取**(返回完整数组,适合帧数不多的场景):
+
 ```python
 from feature_extractor import DINOExtractor, DepthExtractor, PoseExtractor, FeatureStore
 
 dino = DINOExtractor(model_name="dinov3_vits16plus", device="cuda")
 feats = dino.extract_video("clip.mp4", frame_indices=[0, 8, 16])  # (3, N+1, 384)
 ```
+
+**流式提取**(全帧/长视频,内存按块封顶、逐块写入 store;见第 6.1 节)。
+`extract_video_streaming` **不返回数组**,而是直接把每块写进 `FeatureStore` 并在结束时打
+`complete` 标记,结果通过 `store.read_*` 取回:
+
+```python
+from feature_extractor import DINOExtractor, FeatureStore
+
+store = FeatureStore("data/features")
+dino = DINOExtractor(model_name="dinov3_vits16plus", device="cuda")
+
+# frame_indices 传全部帧即可做全帧;block_size 控制每块帧数(内存上限)
+dino.extract_video_streaming(
+    "clip.mp4",
+    frame_indices=list(range(n_frames)),
+    store=store,
+    video_id="clip",
+    block_size=512,
+)
+
+feats = store.read_dino("clip")                 # (n_frames, N+1, 384) float32
+assert store.is_branch_complete("clip", "dino") # 写盘完成标记
+```
+
+> 目前仅 `DINOExtractor` 提供 `extract_video_streaming`;`DepthExtractor` / `PoseExtractor`
+> 的流式接口将在 Phase 2/3 加入(见第 6.1 节)。底层分块工具在
+> `feature_extractor.chunking`(`plan_blocks` / `iter_frame_blocks`),增量写入接口为
+> `FeatureStore.write_{dino,depth,pose}_chunk(...)`。
 
 ## 10. 已知限制与注意事项
 
