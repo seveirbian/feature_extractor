@@ -27,3 +27,9 @@ def test_extract_single_video_accepts_depth_overlap():
     sig = inspect.signature(extract_single_video)
     assert "depth_overlap" in sig.parameters
     assert sig.parameters["depth_overlap"].default == 96
+
+
+def test_extract_single_video_accepts_pose_params():
+    sig = inspect.signature(extract_single_video)
+    assert sig.parameters["pose_window"].default == 600
+    assert sig.parameters["pose_overlap"].default == 120
