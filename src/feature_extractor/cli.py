@@ -128,6 +128,7 @@ def extract_single_video(
     resume: bool = False,
     stream: bool = False,
     block_size: int = 1024,
+    depth_overlap: int = 96,
 ) -> bool:
     """Extract all features for one video. Returns True if successful."""
     if resume and branches_to_resume_skip(store, video_id, branches):
@@ -146,11 +147,17 @@ def extract_single_video(
                 store.write_dino(video_id, dino_feats, frame_indices=frame_indices)
                 store.mark_branch_complete(video_id, "dino")
 
-        # Extract Depth (in-memory path; streaming added in Phase 2)
+        # Extract Depth
         if extractor_depth is not None:
-            depth_inv = extractor_depth.extract_video(video_path, frame_indices=frame_indices)
-            store.write_depth(video_id, depth_inv, frame_indices=frame_indices)
-            store.mark_branch_complete(video_id, "depth")
+            if stream:
+                extractor_depth.extract_video_depth_streaming(
+                    video_path, frame_indices, store, video_id,
+                    block_size=block_size, overlap=depth_overlap,
+                )
+            else:
+                depth_inv = extractor_depth.extract_video(video_path, frame_indices=frame_indices)
+                store.write_depth(video_id, depth_inv, frame_indices=frame_indices)
+                store.mark_branch_complete(video_id, "depth")
 
         # Extract Pose (in-memory path; streaming added in Phase 3)
         if extractor_pose is not None:
@@ -297,6 +304,7 @@ def main():
             resume=args.resume,
             stream=stream,
             block_size=args.block_size,
+            depth_overlap=args.depth_overlap,
         )
 
         if ok:

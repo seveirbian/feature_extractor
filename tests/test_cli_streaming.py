@@ -17,3 +17,13 @@ def test_resume_skips_only_completed(tmp_path):
     assert branches_to_resume_skip(store, vid, ["dino"]) is False
     store.mark_branch_complete(vid, "dino")
     assert branches_to_resume_skip(store, vid, ["dino"]) is True
+
+
+import inspect
+from feature_extractor.cli import extract_single_video
+
+
+def test_extract_single_video_accepts_depth_overlap():
+    sig = inspect.signature(extract_single_video)
+    assert "depth_overlap" in sig.parameters
+    assert sig.parameters["depth_overlap"].default == 96
