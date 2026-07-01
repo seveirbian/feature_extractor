@@ -197,6 +197,18 @@ CUDA_VISIBLE_DEVICES=7 uv run feature-extract \
 | `--pose_window` | `600` | Pose(VGGT)窗口长度,受显存约束(预留,Phase 3 生效) |
 | `--pose_overlap` | `120` | Pose 窗口间的重叠帧数(预留,Phase 3 生效) |
 
+> **`--frames_per_video` 与 `--stream_threshold` 的关系**:两者作用在不同阶段、互相正交。
+> `--frames_per_video` 决定**采样多少帧**(选哪些帧、共几帧);`--stream_threshold` 再拿这个
+> **采样后的帧数**去比较,决定**用什么内存策略处理**(`采样帧数 > 阈值` → 流式分块,否则一次性
+> 内存路径)。`--stream_threshold` **只影响处理方式,不改变提取哪些帧**,两种路径输出完全一致。
+> 举例(阈值默认 2000):
+> - `--frames_per_video 120`(默认):采样 120 帧 < 2000 → 恒走内存路径,与视频长短无关。
+> - `--frames_per_video 0`(全帧)+ 长视频(如 18000 帧):采样 18000 > 2000 → 走流式。
+> - `--frames_per_video 0`(全帧)+ 短视频(如 300 帧):采样 300 < 2000 → 仍走内存路径。
+>
+> 即:`--stream_threshold` 只在 `--frames_per_video` 产生了**大帧数**(大 N,或对长视频取全帧)
+> 时才真正起作用。
+
 ### DINO backbone(`--dino_model`)
 
 DINO 用 HuggingFace `transformers` 的原生 DINOv3 实现(`transformers` 已在依赖中)。可选两个:
