@@ -159,3 +159,21 @@ def test_pose_streaming_writes_every_frame(tmp_path):
     assert store.is_branch_complete("clip", "pose") is True
     # frame 0 is identity pose
     np.testing.assert_allclose(pose[0], [0, 0, 0, 1, 0, 0, 0, 1, 0], atol=1e-4)
+
+
+def test_pose_streaming_recovers_global_trajectory(tmp_path):
+    path = str(tmp_path / "ramp.mp4")
+    n = 12
+    make_ramp_video(path, codec="libx264", n_frames=n, width=64, height=48, step=20)
+    store = FeatureStore(str(tmp_path / "store"))
+
+    _StubPose().extract_video_pose_streaming(
+        path, list(range(n)), store, "clip", window=6, overlap=3)  # multi-window
+    got = store.read_pose("clip")
+
+    # ground-truth frame-0-relative poses from the same GT trajectory
+    E_gt = np.linalg.inv(np.stack([_gt_c2w(i) for i in range(n)]))  # world-to-camera
+    want = PoseExtractor._relative_se3_from_extrinsics(E_gt.astype(np.float32))
+
+    assert got.shape == want.shape == (n, 9)
+    np.testing.assert_allclose(got, want, atol=1e-3)
