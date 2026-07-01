@@ -194,8 +194,8 @@ CUDA_VISIBLE_DEVICES=7 uv run feature-extract \
 | `--stream_threshold` | `2000` | 采样帧数超过此值时切换到流式分块提取 |
 | `--block_size` | `1024` | DINO/Depth 流式分块的块长(帧) |
 | `--depth_overlap` | `96` | Depth 分段间的重叠帧数(预留,Phase 2 生效) |
-| `--pose_window` | `600` | Pose(VGGT)窗口长度,受显存约束(预留,Phase 3 生效) |
-| `--pose_overlap` | `120` | Pose 窗口间的重叠帧数(预留,Phase 3 生效) |
+| `--pose_window` | `32` | Pose(VGGT)窗口长度,**受显存强约束**(32GB@518px 约 32 帧;显存大可调高) |
+| `--pose_overlap` | `8` | Pose 窗口间的重叠帧数 |
 
 > **`--frames_per_video` 与 `--stream_threshold` 的关系**:两者作用在不同阶段、互相正交。
 > `--frames_per_video` 决定**采样多少帧**(选哪些帧、共几帧);`--stream_threshold` 再拿这个
@@ -296,9 +296,11 @@ CUDA_VISIBLE_DEVICES=7 uv run feature-extract \
 > - **Depth** 流式为**分段重叠 + 尺度对齐**:每段 VDA 推理后用重叠帧做原始域仿射对齐,再用
 >   全局间隔的 Depth Pro 关键帧标定到米制(锚点跨段携带),`--depth_overlap`(默认 96)控制
 >   重叠帧数,越大段边界越平滑。
-> - **Pose** 为 **VGGT 滑窗 + sim(3) 拼接**:每个窗口(`--pose_window`,默认 600,受显存约束)
->   推理后,用重叠帧(`--pose_overlap`,默认 120)估计相似变换(旋转+平移+尺度)拼接成全局
->   frame-0 相对轨迹。窗口重叠越大,跨窗漂移越小。
+> - **Pose** 为 **VGGT 滑窗 + sim(3) 拼接**:每个窗口(`--pose_window`,默认 32)推理后,用
+>   重叠帧(`--pose_overlap`,默认 8)估计相似变换(旋转+平移+尺度)拼接成全局 frame-0 相对轨迹。
+>   **VGGT 显存随帧数近似 O(N²),是最吃显存的分支**:32GB@518px 单窗口上限约 32 帧,显存更大
+>   应调高 `--pose_window`(窗口越大上下文越好、跨窗漂移越小)。建议加环境变量
+>   `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` 减少显存碎片。
 
 ## 7. 深度模式(`--depth_mode`)
 

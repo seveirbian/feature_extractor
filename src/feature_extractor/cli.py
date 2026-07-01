@@ -129,8 +129,8 @@ def extract_single_video(
     stream: bool = False,
     block_size: int = 1024,
     depth_overlap: int = 96,
-    pose_window: int = 600,
-    pose_overlap: int = 120,
+    pose_window: int = 32,
+    pose_overlap: int = 8,
 ) -> bool:
     """Extract all features for one video. Returns True if successful."""
     if resume and branches_to_resume_skip(store, video_id, branches):
@@ -203,11 +203,12 @@ def main():
                         help="Number of original video frames to sample per video; <=0 means all")
     parser.add_argument("--block_size", type=int, default=1024,
                         help="DINO/Depth streaming block length (frames)")
-    parser.add_argument("--pose_window", type=int, default=600,
-                        help="VGGT pose window length (frames); GPU-bound")
+    parser.add_argument("--pose_window", type=int, default=32,
+                        help="VGGT pose window length (frames); GPU-bound "
+                             "(~32 fits 32GB at 518px; raise it if you have more VRAM)")
     parser.add_argument("--depth_overlap", type=int, default=96,
                         help="Overlap frames between depth segments")
-    parser.add_argument("--pose_overlap", type=int, default=120,
+    parser.add_argument("--pose_overlap", type=int, default=8,
                         help="Overlap frames between pose windows")
     parser.add_argument("--stream_threshold", type=int, default=2000,
                         help="Route to streaming path above this selected frame count")
